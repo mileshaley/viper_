@@ -1,11 +1,4 @@
 #pragma once
 
-#include <unordered_map>
-
-namespace viper_ {
-
-
-
-} // namespace viper_
-
-
+#include "common.h"
+#include "variable.h"
