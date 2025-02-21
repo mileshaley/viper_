@@ -59,7 +59,6 @@ namespace viper_::detail {
 		void destroy();
 
 	private:
-
 		void check_assignment_type(std::type_info const& new_type);
 
 		std::any m_data;
