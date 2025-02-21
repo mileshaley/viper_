@@ -6,7 +6,6 @@
 #include <stdint.h> // uint64_t
 
 namespace viper_::detail {
-
 	
 	class variable_storage {
 	public:
@@ -21,17 +20,3 @@ namespace viper_::detail {
 	}; // class variable_storage
 
 } //namespace viper_::detail
-
-namespace viper_::literals {
-	static detail::variable& operator""_(const char* string, size_t length) {
-		return detail::variable_storage::global_context().map()[std::string(string, length)];
-	}
-
-	static detail::variable& operator""_(uint64_t integer) {
-		return detail::variable_storage::global_context().map()[std::to_string(integer)];
-	}
-
-	static detail::variable& operator""_(long double floating) {
-		return detail::variable_storage::global_context().map()[std::to_string(floating)];
-	}
-} // namespace viper_::literals

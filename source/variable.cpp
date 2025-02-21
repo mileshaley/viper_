@@ -24,7 +24,7 @@ void viper_::detail::variable::check_assignment_type(std::type_info const& new_t
 			throw type_error("Variable type was reassigned");
 		}
 	} else /* !m_alive */ {
-		if (*m_hint != new_type) {
+		if (m_hint != nullptr && *m_hint != new_type) {
 			throw type_error("Variable type does not match hint type");
 		}
 	}

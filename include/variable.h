@@ -16,14 +16,15 @@ namespace viper_::detail {
 			check_assignment_type(rhs.m_data.type());
 			m_data = rhs.m_data;
 			create();
+			return *this;
 		}
 		
 		template<typename T>
 		variable& operator=(T const& rhs) {
-			if (this == &rhs) { return *this; }
 			check_assignment_type(typeid(T));
 			m_data = rhs;
 			create();
+			return *this;
 		}
 
 		/// move semantics might not be a great idea for viper_
@@ -37,7 +38,6 @@ namespace viper_::detail {
 		//
 		//template<typename T>
 		//variable& operator=(T&& rhs) {
-		//	if (this == &rhs) { return *this; }
 		//	check_assignment_type(typeid(T));
 		//	m_data = std::move(rhs);
 		//	create();
