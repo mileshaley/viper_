@@ -4,6 +4,7 @@
 #include <utility> // std::move
 #include <type_traits>
 #include "exception.h"
+#include "hint.h"
 
 namespace viper_::detail {
 
@@ -20,6 +21,9 @@ namespace viper_::detail {
 			create();
 			return *this;
 		}
+
+		// Assignment
+		// ----------
 		
 		template<typename T>
 		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
@@ -35,6 +39,26 @@ namespace viper_::detail {
 			return this;
 		}
 
+		// Type Hinting
+		// ------------
+
+		// This one doesn't work yet due to operator precedence
+		// It can be fixed if hint<T> is given an operator= that returns a proxy viper
+		//template<typename T>
+		//inline variable& operator=(hint<T>) {
+		//	return this->hint<T>();
+		//}
+
+		template<typename T>
+		inline constexpr variable& operator^(hint<T>) {
+			return this->hint<T>();
+		}
+
+		template<typename T>
+		inline constexpr variable& operator^(T) {
+			return this->hint<T>();
+		}
+
 		template<typename T>
 		inline variable& hint() {
 			if (m_alive) {
@@ -46,6 +70,9 @@ namespace viper_::detail {
 			m_hint = &typeid(std::decay_t<T>);
 			return *this;
 		}
+
+		// Lifetime Utility
+		// ----------------
 
 		void create();
 		void destroy();
