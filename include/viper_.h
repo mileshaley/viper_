@@ -8,12 +8,11 @@
 #include <string>
 #include <unordered_map>
 #include <stdint.h>
-
 #include <any> // variable data
-#include <utility>
-#include <type_traits>
-#include <iostream>
-#include <memory>
+#include <utility> // move
+#include <type_traits> // decay_t
+#include <iostream> // cout
+#include <memory> // unique_ptr
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -330,7 +329,7 @@ namespace viper_::detail {
 		static inline type_instatiatior<T> global_instantiator{};
 	}; // class type_instatiatior
 
-} //namespace viper_::detail
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Literal Operators                                                         *
@@ -353,7 +352,7 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
- * Literal Operators                                                         *
+ * Format Print Function                                                     *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_ {
@@ -368,7 +367,7 @@ namespace viper_ {
 			}
 			else if (inside_format && out[i] == '}') {
 				inside_format = false;
-				int variable_length = i - begin_format - 1;
+				const int variable_length = i - begin_format - 1;
 
 				detail::variable_storage::map_type const& var_map 
 					= detail::variable_storage::global_context().map();
@@ -394,14 +393,35 @@ namespace viper_ {
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
+ * Underscore Proxy                                                          *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Macros                                                                    *
+\*~-------------------------------------------------------------------------~*/
+
+#define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
+#define VIPER_UNDERSCORE 1223
+
+/*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
 \*~-------------------------------------------------------------------------~*/
 
-// Define VIPER_NO_NAMESPACE_POLLUTION before this file is
-// included to avoid viper polluting the global namespace
+// Before including this file you may choose to do any combination of the following:
+//     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution
+//     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _)
+
 #if !defined(VIPER_NO_NAMESPACE_POLLUTION)
-using namespace viper_::literals;
-using viper_::hint;
-using viper_::type_error;
-using viper_::print;
+	using namespace viper_::literals;
+	using viper_::hint;
+	using viper_::type_error;
+	using viper_::print;
 #endif // !defined(VIPER_NO_NAMESPACE_POLLUTION)
+
+#if !defined(VIPER_NO_MACRO_POLLUTION)
+	#define _ VIPER_UNDERSCORE
+#endif // !defined(VIPER_NO_MACRO_POLLUTION)

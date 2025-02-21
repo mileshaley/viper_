@@ -10,7 +10,7 @@ int main() {
 
 	"hello"_ ^ hint(10) = 20;
 	3.5_ ^ hint<double>() = 214.232;
-	12_ = 4;
+	12_ = _;
 	"var2"_->hint<const char*>() = "world";
 	print("hello! 12={12} and var2={var2} and 12={12} still");
 
