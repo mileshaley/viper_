@@ -12,6 +12,19 @@
 #include <any> // variable data
 #include <utility>
 #include <type_traits>
+#include <iostream>
+#include <memory>
+
+/*~-------------------------------------------------------------------------~*\
+ * Forward Declarations                                                      *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	template<typename T>
+	class instantiate_type;
+
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Errors & Exceptions                                                       *
@@ -27,8 +40,7 @@ namespace viper_ {
 		explicit type_error(const char* message)
 			: runtime_error(message) {
 		}
-	private:
-	};
+	}; // class type_error
 } //namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
@@ -43,7 +55,7 @@ namespace viper_ {
 		using type = T;
 		inline constexpr hint() {}
 		inline constexpr hint(T) {}
-	};
+	}; // class hint
 
 	// Deduction guide
 	template<typename T>
@@ -80,17 +92,17 @@ namespace viper_::detail {
 			return *this;
 		}
 
-
-
 		template<typename T>
 		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
 		inline variable& operator=(T rhs) {
+			// Explicitly instantiate T
+			using instantiated = instantiate_type<T>;
+			static instantiated g2{};
 			check_assignment_type(typeid(std::decay_t<T>));
 			m_data = rhs;
 			create();
 			return *this;
 		}
-
 
 			// Access Operators
 	public: // ----------------
@@ -122,6 +134,9 @@ namespace viper_::detail {
 
 		template<typename T>
 		inline variable& hint() {
+			// Explicitly instantiate T
+			using instantiated = instantiate_type<T>;
+			static instantiated g{};
 			if (m_alive) {
 				throw type_error("Cannot hint an initalized variable's type");
 			}
@@ -132,8 +147,16 @@ namespace viper_::detail {
 			return *this;
 		}
 
-			// Lifetime Utility //
-	public: // ---------------- //
+			// Utility //
+	public: // ------- //
+
+		std::any const& data() const {
+			return m_data;
+		}
+
+		inline size_t type_hash_code() const {
+			return m_data.type().hash_code();
+		}
 
 		inline void create() {
 			m_alive = true;
@@ -197,6 +220,119 @@ namespace viper_::detail {
 } //namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
+ * String Representation of Data                                             *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	template<typename T>
+	class string_representation {
+	public:
+		static inline std::string get(T const& data) {
+			return std::to_string(data);
+		}
+	}; // class string_representation<T>
+
+	template<>
+	class string_representation<const char*> {
+	public:
+		static inline std::string get(const char* const& data) {
+			return std::string(data);
+		}
+	}; // class string_representation<cosnt char*>
+
+	template<>
+	class string_representation<std::string> {
+	public:
+		static inline std::string get(std::string const& data) {
+			return data;
+		}
+	}; // class string_representation<std::string>
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Records                                                              *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class type_record {
+	public:
+		type_record() = default;
+		virtual ~type_record() = default;
+		virtual std::string get_string_data(std::any const& data) const = 0;
+	}; // class type_record
+
+	template<typename T>
+	class typed_type_record : public type_record {
+	public:
+		using type = T;
+		typed_type_record() = default;
+		virtual ~typed_type_record() override = default;
+
+		virtual std::string get_string_data(std::any const& data) const override {
+			return string_representation<T>::get(std::any_cast<T const&>(data));
+		}
+	}; // class type_record
+
+} //namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Record Storage                                                       *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class type_record_storage {
+	public:
+		using map_type = std::unordered_map<size_t, std::unique_ptr<type_record>>;
+		static inline type_record_storage& global_context() {
+			static type_record_storage storage{};
+			return storage;
+		}
+
+		type_record_storage() = default;
+
+		inline map_type& map() {
+			return m_data;
+		}
+
+		template<typename T>
+		inline void register_type(size_t key) {
+			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
+		}
+
+	private:
+		map_type m_data;
+	}; // class type_record_storage
+
+} //namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Instantiation                                                        *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	template<typename T>
+	class type_instatiatior {
+	public:
+		using type = T;
+
+		inline type_instatiatior() {
+			type_record_storage::global_context().register_type<T>(
+				typeid(std::decay_t<T>).hash_code());
+		}
+	}; // class type_instatiatior
+
+	template<typename T>
+	class instantiate_type {
+	public:
+		static inline type_instatiatior<T> global_instantiator{};
+	}; // class type_instatiatior
+
+} //namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Literal Operators                                                         *
 \*~-------------------------------------------------------------------------~*/
 
@@ -217,6 +353,47 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
+ * Literal Operators                                                         *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+	inline void print(std::string const& text) {
+		std::string out(text);
+		int begin_format = -1;
+		bool inside_format = false;
+		for (int i = 0; i < out.size(); ++i) {
+			if (out[i] == '{') {
+				inside_format = true;
+				begin_format = i;
+			}
+			else if (inside_format && out[i] == '}') {
+				inside_format = false;
+				int variable_length = i - begin_format - 1;
+
+				detail::variable_storage::map_type const& var_map 
+					= detail::variable_storage::global_context().map();
+				detail::type_record_storage::map_type const& type_map 
+					= detail::type_record_storage::global_context().map();
+				
+				std::string data_string = "";
+
+				auto var_it = var_map.find(out.substr(begin_format + 1llu, variable_length));
+				if (var_it != var_map.end()) {
+					auto type_it = type_map.find(var_it->second.type_hash_code());
+					if (type_it != type_map.end()) {
+						data_string = type_it->second->get_string_data(var_it->second.data());
+					}
+				}
+
+				out.replace(begin_format, i - begin_format + 1, data_string);
+				i += variable_length - 2; // -2 to account for {}
+			}
+		}
+		std::cout << out << std::endl;
+	}
+} // namespace viper_
+
+/*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
 \*~-------------------------------------------------------------------------~*/
 
@@ -226,4 +403,5 @@ namespace viper_::literals {
 using namespace viper_::literals;
 using viper_::hint;
 using viper_::type_error;
+using viper_::print;
 #endif // !defined(VIPER_NO_NAMESPACE_POLLUTION)
