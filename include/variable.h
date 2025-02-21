@@ -4,7 +4,7 @@
 #include <utility> // std::move
 #include "exception.h"
 
-namespace viper_ {
+namespace viper_::detail {
 	class variable {
 	public:
 		variable();
@@ -13,47 +13,58 @@ namespace viper_ {
 
 		variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
-			if (m_alive && m_data.type() != rhs.m_data.type()) {
-				throw type_error("Variable type was reassigned");
-			}
+			check_assignment_type(rhs.m_data.type());
 			m_data = rhs.m_data;
-			create();
-		}
-		
-		variable& operator=(variable&& rhs) noexcept {
-			if (this == &rhs) { return *this; }
-			if (m_alive && m_data.type() != rhs.m_data.type()) {
-				throw type_error("Variable type was reassigned");
-			}
-			m_data = std::move(rhs.m_data);
 			create();
 		}
 		
 		template<typename T>
 		variable& operator=(T const& rhs) {
 			if (this == &rhs) { return *this; }
-			if (m_alive && m_data.type() != typeid(T)) {
-				throw type_error("Variable type was reassigned");
-			}
+			check_assignment_type(typeid(T));
+			m_data = rhs;
 			create();
 		}
-		
+
+		/// move semantics might not be a great idea for viper_
+
+		//variable& operator=(variable&& rhs) {
+		//	if (this == &rhs) { return *this; }
+		//	check_assignment_type(rhs.m_data.type());
+		//	m_data = std::move(rhs.m_data);
+		//	create();
+		//}
+		//
+		//template<typename T>
+		//variable& operator=(T&& rhs) {
+		//	if (this == &rhs) { return *this; }
+		//	check_assignment_type(typeid(T));
+		//	m_data = std::move(rhs);
+		//	create();
+		//}
+
 		template<typename T>
-		variable& operator=(T&& rhs) noexcept {
-			if (this == &rhs) { return *this; }
-			if (m_alive && m_data.type() != typeid(T)) {
-				throw type_error("Variable type was reassigned");
+		void hint() {
+			if (m_alive) {
+				throw type_error("Cannot hint an initalized variable's type");
 			}
-			m_data = std::move(rhs);
-			create();
+			if (m_hint != nullptr) {
+				throw type_error("Cannot hint a variable's type more than once");
+			}
+
+			m_hint = &typeid(T);
 		}
 
 		void create();
 		void destroy();
 
 	private:
+
+		void check_assignment_type(std::type_info const& new_type);
+
 		std::any m_data;
-		bool m_alive = false;
+		std::type_info const* m_hint;
+		bool m_alive;
 
 	}; // class variable
-} // namespace viper_
+} // namespace viper_::detail
