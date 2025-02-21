@@ -1,6 +1,5 @@
 #include "variable.h"
 
-
 viper_::detail::variable::variable() 
 	: m_data()
 	, m_alive(false)
@@ -23,9 +22,7 @@ void viper_::detail::variable::check_assignment_type(std::type_info const& new_t
 		if (m_data.type() != new_type) {
 			throw type_error("Variable type was reassigned");
 		}
-	} else /* !m_alive */ {
-		if (m_hint != nullptr && *m_hint != new_type) {
-			throw type_error("Variable type does not match hint type");
-		}
+	} else if (m_hint != nullptr && *m_hint != new_type) {
+		throw type_error("Variable type does not match hint type");
 	}
 }

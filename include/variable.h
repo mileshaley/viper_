@@ -2,16 +2,18 @@
 
 #include <any> // variable data
 #include <utility> // std::move
+#include <type_traits>
 #include "exception.h"
 
 namespace viper_::detail {
+
 	class variable {
 	public:
 		variable();
 		variable(variable const&) = delete;
 		variable(variable&&) = delete;
 
-		variable& operator=(variable const& rhs) {
+		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
 			check_assignment_type(rhs.m_data.type());
 			m_data = rhs.m_data;
@@ -20,39 +22,29 @@ namespace viper_::detail {
 		}
 		
 		template<typename T>
-		variable& operator=(T const& rhs) {
-			check_assignment_type(typeid(T));
+		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
+		inline variable& operator=(T rhs) {
+			check_assignment_type(typeid(std::decay_t<T>));
 			m_data = rhs;
 			create();
 			return *this;
 		}
 
-		/// move semantics might not be a great idea for viper_
-
-		//variable& operator=(variable&& rhs) {
-		//	if (this == &rhs) { return *this; }
-		//	check_assignment_type(rhs.m_data.type());
-		//	m_data = std::move(rhs.m_data);
-		//	create();
-		//}
-		//
-		//template<typename T>
-		//variable& operator=(T&& rhs) {
-		//	check_assignment_type(typeid(T));
-		//	m_data = std::move(rhs);
-		//	create();
-		//}
+		// To avoid issues with literal operator followed by .
+		inline variable* operator->() {
+			return this;
+		}
 
 		template<typename T>
-		void hint() {
+		inline variable& hint() {
 			if (m_alive) {
 				throw type_error("Cannot hint an initalized variable's type");
 			}
 			if (m_hint != nullptr) {
 				throw type_error("Cannot hint a variable's type more than once");
 			}
-
-			m_hint = &typeid(T);
+			m_hint = &typeid(std::decay_t<T>);
+			return *this;
 		}
 
 		void create();
