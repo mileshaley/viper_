@@ -14,5 +14,9 @@ int main() {
 	"var2"_->hint<const char*>() = "world";
 	print("hello! 12={12} and var2={var2} and 12={12} still");
 
+	int blug = 3;
+	float wung(felve) = 120.0f;
+	felvefelve = 5.01f * blug;
+
 	return 0;
 }

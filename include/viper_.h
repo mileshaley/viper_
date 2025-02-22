@@ -5,14 +5,14 @@
 \*~-------------------------------------------------------------------------~*/
 
 #include <stdexcept>
+#include <stdint.h>
+#include <utility>
+#include <iostream>
+#include <memory>
+#include <type_traits>
 #include <string>
 #include <unordered_map>
-#include <stdint.h>
-#include <any> // variable data
-#include <utility> // move
-#include <type_traits> // decay_t
-#include <iostream> // cout
-#include <memory> // unique_ptr
+#include <any>
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -223,13 +223,26 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
+
+	template<typename T, class = void>
+	class has_to_string 
+		: public std::false_type {};
+
+	template<typename T>
+	class has_to_string<T, std::void_t<decltype(std::to_string(std::declval<T>()))>> 
+		: public std::true_type {};
+
 	template<typename T>
 	class string_representation {
 	public:
 		static inline std::string get(T const& data) {
-			return std::to_string(data);
+			if constexpr (has_to_string<T>::value) {
+				return std::to_string(data);
+			} else {
+				return {};
+			}
 		}
-	}; // class string_representation<T>
+	}; // class string_representation<T>\
 
 	template<>
 	class string_representation<const char*> {
@@ -397,7 +410,15 @@ namespace viper_ {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
+	class underscore_proxy {
+	public: 
+		inline underscore_proxy() {
 
+		}
+
+
+		
+	}; // class underscore_proxy
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
@@ -405,7 +426,11 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 #define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
-#define VIPER_UNDERSCORE 1223
+#define VIPER_UNDERSCORE ::viper_::detail::underscore_proxy{}
+
+#define blug(Paint) Paint##Paint
+
+#define wung blug
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
