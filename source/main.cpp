@@ -1,5 +1,20 @@
 #include "viper_.h"
 
+#if 0 // Sample
+
+def add_res("a"_, "b"_)
+_	"sum"_ = "a"_ + "b"_
+_	"statement"_ = f"sum {a}+{b}={sum} is: "
+_	if_ "sum"_ > 0
+_	_	print("statement"_ + "positive")
+_	elif_ "sum"_ < 0
+_	_	print("statement"_ + "negative")
+_	elif_ "sum"_ == 0
+_	_	print("statement"_ + "equal to 0")
+_	return_ ""
+
+#endif
+
 def my_fn() {
 	std::cout << "hello, world!";
 }
