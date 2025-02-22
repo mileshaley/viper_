@@ -27,66 +27,33 @@ print("{123} This is a format print so my_variable = {my_variable}. Cool, right?
 
 ##### Variables can optionally be given a type hint for type safety with `_(Type)`:
 ```cpp
-"var"_ _(int) = 100;
+"hinted"_ _(int) = 100; // Okay
+"bad_hint"_ _(int) = "100"; // Throws a type error
 ```
 
-## Comparisons:
-<table>
-    <tr><td> viper_ </td> <td> Python </td></tr>
-    <tr>
-        <td style="padding: 0; vertical-align: top;"> 
+## Comparison:
+
+##### viper_:
 
 ```cpp
-"my_variable"_ = 100;
-// Also supports other literals:
-123_ = "Hello, World!";
-3.14_ = 123_; // 3.14 = "Hello, World!"
+int main() {
+    "my_variable"_ = 100;
+    // Also supports other literals:
+    123_ = "Hello, World!";
+    3.14_ = 123_; // 3.14 = "Hello, World!"
+    print("{123} This is a format print so my_variable = {my_variable}. Cool, right?");
+    "hinted"_ _(int) = 100; // Okay
+    "bad_hint"_ _(int) = "100"; // Throws a type error
+}
 ```
 
-
-
-</td>
-        <td style="padding: 0; vertical-align: top;">
-
+##### Python:
 ```py
 my_variable = 100
-# Doesn't support variables named with numbers
-
-
+# Doesn't support variable names beginning with numbers or containing '.'
+var123 = "Hello, World!"
+var3_14 = var123 # var3_14 = "Hello, World!"
+print(f"{var123} This is a format print so my_variable = {my_variable}. Cool, right?")
+hinted : int = 100 # Okay
+bad_hint : int = "100" # No error but could be caught by a static analyzer
 ```
-
-</td>
-    </tr>
-    <tr>
-        <td style="padding: 0; vertical-align: top;">
-
-```cpp
-print("my_variable = {my_variable}.");
-```
-
-</td>
-        <td style="padding: 0; vertical-align: top;">
-
-```py
-print(f"my_variable = {my_variable}.")
-```
-
-</td>
-    </tr>
-    <tr>
-        <td style="padding: 0; vertical-align: top;">
-
-```cpp
-"var"_ _(int) = 100;
-```
-
-</td>
-        <td style="padding: 0; vertical-align: top;">
-
-```py
-var : int = 100
-```
-
-</td>
-    </tr>
-</table>
