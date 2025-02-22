@@ -415,29 +415,28 @@ namespace viper_::detail {
 		inline underscore_proxy() {
 
 		}
-
-
-		
 	}; // class underscore_proxy
 } // namespace viper_::detail
+
+// Intentionally located in the global namespace so VIPER_UNDERSCORE can name
+// either this or the macro depending on if () is present after the identifier
+static inline viper_::detail::underscore_proxy VIPER_UNDERSCORE_PROXY_OR_HINT;
+
+#define VIPER_UNDERSCORE_PROXY_OR_HINT(Type) VIPER_HINT(Type)
 
 /*~-------------------------------------------------------------------------~*\
  * Macros                                                                    *
 \*~-------------------------------------------------------------------------~*/
 
 #define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
-#define VIPER_UNDERSCORE ::viper_::detail::underscore_proxy{}
-
-#define blug(Paint) Paint##Paint
-
-#define wung blug
+#define VIPER_UNDERSCORE VIPER_UNDERSCORE_PROXY_OR_HINT
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
 \*~-------------------------------------------------------------------------~*/
 
 // Before including this file you may choose to do any combination of the following:
-//     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution
+//     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution with short identifiers
 //     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _)
 
 #if !defined(VIPER_NO_NAMESPACE_POLLUTION)
