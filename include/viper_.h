@@ -418,11 +418,20 @@ namespace viper_::detail {
 	}; // class underscore_proxy
 } // namespace viper_::detail
 
-// Intentionally located in the global namespace so VIPER_UNDERSCORE can name
-// either this or the macro depending on if () is present after the identifier
+// Intentionally located in the global namespace so VIPER_UNDERSCORE can name either
+// this or the macro depending on if parenthesis are present after the identifier
 static inline viper_::detail::underscore_proxy VIPER_UNDERSCORE_PROXY_OR_HINT;
 
 #define VIPER_UNDERSCORE_PROXY_OR_HINT(Type) VIPER_HINT(Type)
+
+/*~-------------------------------------------------------------------------~*\
+ * Constants                                                                 *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+	static inline constexpr bool True = true;
+	static inline constexpr bool False = false;
+} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Macros                                                                    *
@@ -430,6 +439,11 @@ static inline viper_::detail::underscore_proxy VIPER_UNDERSCORE_PROXY_OR_HINT;
 
 #define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
 #define VIPER_UNDERSCORE VIPER_UNDERSCORE_PROXY_OR_HINT
+
+#define VIPER_IN :
+#define VIPER_ELIF else if
+#define VIPER_EXCEPT catch
+#define VIPER_DEF auto
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -444,8 +458,16 @@ static inline viper_::detail::underscore_proxy VIPER_UNDERSCORE_PROXY_OR_HINT;
 	using viper_::hint;
 	using viper_::type_error;
 	using viper_::print;
+
+	using viper_::True;
+	using viper_::False;
 #endif // !defined(VIPER_NO_NAMESPACE_POLLUTION)
 
 #if !defined(VIPER_NO_MACRO_POLLUTION)
 	#define _ VIPER_UNDERSCORE
+
+	#define in VIPER_IN
+	#define elif VIPER_ELIF
+	#define except VIPER_EXCEPT
+	#define def VIPER_DEF
 #endif // !defined(VIPER_NO_MACRO_POLLUTION)
