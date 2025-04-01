@@ -365,93 +365,163 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
- * Format Print Function                                                     *
+ * Format Strings                                                            *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
+	inline void format_string_in_place(std::string& out) {
+		int begin_format = -1;
+		bool inside_format = false;
+		for (int i = 0; i < out.size(); ++i) {
+			if (out[i] == '{') {
+				inside_format = true;
+				begin_format = i;
+			} else if (inside_format && out[i] == '}') {
+				inside_format = false;
+				const int variable_length = i - begin_format - 1;
 
-	inline std::string evaluate_string_to_string(std::string_view str) {
-		size_t identifier_begin = 0;
-		bool in_identifier = false;
+				detail::variable_storage::map_type const& var_map
+					= detail::variable_storage::global_context().map();
+				detail::type_record_storage::map_type const& type_map
+					= detail::type_record_storage::global_context().map();
 
-		detail::variable_storage::map_type const& var_map
-			= detail::variable_storage::global_context().map();
-		detail::type_record_storage::map_type const& type_map
-			= detail::type_record_storage::global_context().map();
+				std::string data_string = "";
 
-		const auto get_variable = [&](size_t begin, size_t end) -> variable const* {
-			auto var_it = var_map.find(std::string(str.substr(begin, end - begin)));
-			if (var_it != var_map.end()) {
-				return &var_it->second;
-				//auto type_it = type_map.find(var_it->second.type_hash_code());
-				//if (type_it != type_map.end()) {
-				//	data_string = type_it->second->get_string_data(var_it->second.data());
-				//}
-			}
-		};
-
-
-		for (size_t i = 0; i < str.size(); ++i) {
-			
-			if (str[i] == ' ') {
-				if (in_identifier) {
-
-				} else {
-					
+				auto var_it = var_map.find(out.substr(begin_format + 1llu, variable_length));
+				if (var_it != var_map.end()) {
+					auto type_it = type_map.find(var_it->second.type_hash_code());
+					if (type_it != type_map.end()) {
+						data_string = type_it->second->get_string_data(var_it->second.data());
+					}
 				}
+
+				out.replace(begin_format, i - begin_format + 1, data_string);
+				i += variable_length - 2; // -2 to account for {}
 			}
-
 		}
-
-
-
-
 	}
 } // namespace viper_::detail
 
 namespace viper_ {
-
-	inline std::string format_in_place(std::string& text) {
-		int begin_format = -1;
-		bool inside_format = false;
-		for (int i = 0; i < text.size(); ++i) {
-			if (inside_format) {
-				if (text[i] == '=') {
-					const int expression_length = i - begin_format - 1;
-
-				}
-				else if (text[i] == '}') {
-
-					inside_format = false;
-					const int expression_length = i - begin_format - 1;
-
-					detail::variable_storage::map_type const& var_map
-						= detail::variable_storage::global_context().map();
-					detail::type_record_storage::map_type const& type_map
-						= detail::type_record_storage::global_context().map();
-
-					std::string data_string = "{?}";
-
-
-
-					text.replace(begin_format, i - begin_format + 1, data_string);
-					i += expression_length - 2; // -2 to account for {}
-				}
-			}
-			else {
-				if (text[i] == '{') {
-					inside_format = true;
-					begin_format = i;
-				}
-			}
+	class format_string {
+	public:
+		inline format_string(const char* raw_string) 
+			: m_raw(raw_string)
+			, m_formatted(m_raw)
+		{
+			detail::format_string_in_place(m_formatted);
 		}
+
+		inline std::string const& get_formatted() const {
+			return m_formatted;
+		}
+
+		inline operator std::string const& () const {
+			return m_formatted;
+		}
+
+	private:
+		std::string m_raw;
+		std::string m_formatted;
+	}; // class format_string
+} // namespace viper_
+
+/*~-------------------------------------------------------------------------~*\
+ * Print Function                                                            *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+	inline void print(std::string const& text) {
+		std::cout << text << std::flush;
 	}
 
-	inline void print(std::string text) {
-		format_in_place(text);
-		std::cout << text << std::endl;
-	}
 } // namespace viper_
+
+//namespace viper_::detail {
+//
+//	inline std::string evaluate_string_to_string(std::string_view str) {
+//		size_t identifier_begin = 0;
+//		bool in_identifier = false;
+//	
+//		detail::variable_storage::map_type const& var_map
+//			= detail::variable_storage::global_context().map();
+//		detail::type_record_storage::map_type const& type_map
+//			= detail::type_record_storage::global_context().map();
+//	
+//		const auto get_variable = [&](size_t begin, size_t end) -> variable const* {
+//			auto var_it = var_map.find(std::string(str.substr(begin, end - begin)));
+//			if (var_it != var_map.end()) {
+//				return &var_it->second;
+//				//auto type_it = type_map.find(var_it->second.type_hash_code());
+//				//if (type_it != type_map.end()) {
+//				//	data_string = type_it->second->get_string_data(var_it->second.data());
+//				//}
+//			}
+//		};
+//	
+//	
+//		for (size_t i = 0; i < str.size(); ++i) {
+//			
+//			if (str[i] == ' ') {
+//				if (in_identifier) {
+//	
+//				} else {
+//					
+//				}
+//			}
+//	
+//		}
+//	
+//	
+//	
+//	
+//	}
+//} // namespace viper_::detail
+
+//namespace viper_ {
+//
+//	inline void format_in_place(std::string& text) {
+//		int begin_format = -1;
+//		bool inside_format = false;
+//		for (int i = 0; i < text.size(); ++i) {
+//			if (inside_format) {
+//				if (text[i] == '=') {
+//					//const int expression_length = i - begin_format - 1;
+//
+//				}
+//				else if (text[i] == '}') {
+//
+//					inside_format = false;
+//					const int expression_length = i - begin_format - 1;
+//
+//					//detail::variable_storage::map_type const& var_map
+//					//	= detail::variable_storage::global_context().map();
+//					//detail::type_record_storage::map_type const& type_map
+//					//	= detail::type_record_storage::global_context().map();
+//
+//					std::string data_string = "{?}";
+//
+//
+//
+//					text.replace(begin_format, i - begin_format + 1, data_string);
+//					i += expression_length - 2; // -2 to account for {}
+//				}
+//			}
+//			else {
+//				if (text[i] == '{') {
+//					inside_format = true;
+//					begin_format = i;
+//				}
+//			}
+//		}
+//	}
+//
+//	inline void print(std::string text) {
+//		format_in_place(text);
+//		std::cout << text << std::endl;
+//	}
+//
+//} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Underscore Proxy                                                          *
@@ -492,6 +562,7 @@ namespace viper_ {
 #define VIPER_ELIF else if
 #define VIPER_EXCEPT catch
 #define VIPER_DEF auto
+#define VIPER_FORMAT (::viper_::format_string)
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -499,7 +570,7 @@ namespace viper_ {
 
 // Before including this file you may choose to do any combination of the following:
 //     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution with short identifiers
-//     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _)
+//     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _ or f)
 
 #if !defined(VIPER_NO_NAMESPACE_POLLUTION)
 	using namespace viper_::literals;
@@ -518,4 +589,5 @@ namespace viper_ {
 	#define elif VIPER_ELIF
 	#define except VIPER_EXCEPT
 	#define def VIPER_DEF
+	#define f VIPER_FORMAT
 #endif // !defined(VIPER_NO_MACRO_POLLUTION)
