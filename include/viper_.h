@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_map>
 #include <any>
+#include <functional>
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -77,7 +78,11 @@ namespace viper_::detail {
 		variable()
 			: m_data()
 			, m_alive(false)
-			, m_hint() {
+			, m_hint()
+			, m_next_link(nullptr)
+			, m_previous_link(nullptr)
+			, m_parameter(false)
+		{
 		}
 
 			// Assignment Operators
@@ -103,12 +108,54 @@ namespace viper_::detail {
 			return *this;
 		}
 
-			// Access Operators
-	public: // ----------------
+			// Access Operator
+	public: // ---------------
 
 		// To avoid issues with literal operator followed by .
 		inline variable* operator->() {
 			return this;
+		}
+
+
+			// Variable Linking
+	public: // ----------------
+
+		// Link two variables together
+		inline variable& operator,(variable& rhs) {
+			m_next_link = &rhs;
+			rhs.m_previous_link = this;
+			return rhs;
+		}
+
+		inline bool is_linked() const {
+			return m_previous_link || m_next_link;
+		}
+
+		inline variable* chain_begin() {
+			if (!m_previous_link) { return this; }
+			return m_previous_link->chain_begin();
+		}
+
+		inline variable* chain_end() {
+			if (!m_next_link) { return this; }
+			return m_next_link->chain_end();
+		}
+
+		inline variable* previous_link() {
+			return m_previous_link;
+		}
+
+		inline variable* next_link() {
+			return m_next_link;
+		}
+			// Parameter Utilities
+	public: // -------------------
+
+		inline bool is_parameter() const {
+			return m_parameter;
+		}
+		inline void set_as_parameter(bool new_state = true) {
+			m_parameter = new_state;
 		}
 
 			// Type Hinting
@@ -185,6 +232,9 @@ namespace viper_::detail {
 		std::any m_data;
 		std::type_info const* m_hint;
 		bool m_alive;
+		bool m_parameter;
+		variable* m_previous_link;
+		variable* m_next_link;
 
 	}; // class variable
 
@@ -365,6 +415,83 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
+ * Functions                                                                 *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class function {
+	public:
+		using callable_type = std::function<variable(function&)>;
+
+		inline function(std::vector<variable*> parameters, callable_type&& callable)
+			: m_parameters(parameters)
+			, m_callable(callable)
+		{
+			//if (m_parameters != nullptr) {
+			//	variable* end_link = m_parameters->chain_end();
+			//	// Traverse the chain of parameters backwards since the
+			//	// linking operator (,) will return the last link in the sequence
+			//	for (variable* link = end_link; link != nullptr; link = link->previous_link()) {
+			//		link->set_as_parameter(true);
+			//	}
+			//}
+		}
+
+		variable operator()(variable& parameters) {
+			(void)parameters;
+		}
+
+	private:
+		callable_type m_callable;
+		std::vector<variable*> m_parameters;
+	}; // class function
+
+	class function_builder {
+	public:
+		inline function_builder()
+			: m_parameters()
+		{}
+
+		inline function_builder(std::initializer_list<std::reference_wrapper<variable>> parameters)
+			: m_parameters()
+		{
+			m_parameters.reserve(parameters.size());
+			for (auto parameter : parameters) {
+				m_parameters.emplace_back(&parameter.get());
+			}
+		}
+
+	private:
+		template<class Callable, class = void>
+		struct returns_void : std::false_type {};
+		template<class Callable>
+		struct returns_void<Callable, std::enable_if_t<std::is_void_v<std::invoke_result_t<Callable, function>>>> : std::true_type {};
+
+	public:
+		template<class Callable>
+		inline constexpr function operator+(Callable const& callable) {
+			if constexpr (returns_void<Callable>::value) {
+				return { move(m_parameters),
+					[&](function& function) -> variable {
+						return variable(callable(function));
+					}
+				};
+			} else {
+				return { move(m_parameters),
+					[&](function& function) -> variable {
+						callable(function);
+						return {};
+					}
+				};
+			}
+		}
+
+	private:
+		std::vector<variable*> m_parameters;
+	}; // class function_builder
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Format Strings                                                            *
 \*~-------------------------------------------------------------------------~*/
 
@@ -434,7 +561,6 @@ namespace viper_ {
 	inline void print(std::string const& text) {
 		std::cout << text << std::flush;
 	}
-
 } // namespace viper_
 
 //namespace viper_::detail {
@@ -555,14 +681,31 @@ namespace viper_ {
  * Macros                                                                    *
 \*~-------------------------------------------------------------------------~*/
 
+static inline auto func_map() {
+	static std::unordered_map<std::string, ::viper_::detail::function> map{};
+	return map;
+}
+static inline auto funcptr_map() {
+	static std::unordered_map<std::string, void(*)()> map{};
+	return map;
+}
+
 #define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
 #define VIPER_UNDERSCORE VIPER_UNDERSCORE_PROXY_OR_HINT
 
 #define VIPER_IN :
 #define VIPER_ELIF else if
 #define VIPER_EXCEPT catch
-#define VIPER_DEF auto
 #define VIPER_FORMAT (::viper_::format_string)
+
+#define VIPER_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
+
+#define VIPER_DEF_INTERNAL(...) ::viper_::detail::function_builder{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
+
+#define VIPER_DEF(Name) ; ::viper_::detail::function Name = VIPER_DEF_INTERNAL
+
+//#define VIPER_DEF_INTERNAL(...) {__VA_ARGS__}.m_function = 
+//#define VIPER_DEF(Name) funcptr_map()[VIPER_FILENAME] ::viper_::detail::function& Name = func_map()[VIPER_FILELINE] = viper_::detail::function VIPER_DEF_INTERNAL
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -577,6 +720,7 @@ namespace viper_ {
 	using viper_::hint;
 	using viper_::type_error;
 	using viper_::print;
+	//using def = viper_::detail::function;
 
 	using viper_::True;
 	using viper_::False;
@@ -588,6 +732,6 @@ namespace viper_ {
 	#define in VIPER_IN
 	#define elif VIPER_ELIF
 	#define except VIPER_EXCEPT
-	#define def VIPER_DEF
 	#define f VIPER_FORMAT
+	#define def VIPER_DEF
 #endif // !defined(VIPER_NO_MACRO_POLLUTION)
