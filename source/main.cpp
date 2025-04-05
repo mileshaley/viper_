@@ -4,16 +4,15 @@
 
 
 int main() {
+	
+	def (foo)("param1"_ = 3, "param2"_ = "hello") {
 
-	; ::viper_::detail::function bar = ::viper_::detail::function_builder{ "param1"_ = 2 } + [&]([[maybe_unused]] ::viper_::detail::function& __function__) {
+	}
+
+	def (bar)() {
 
 	};
 	
-	; ::viper_::detail::function foo = ::viper_::detail::function_builder{ "param1"_ = 3, "param2"_ = "hello" } + [&]([[maybe_unused]] ::viper_::detail::function& __function__) {
-
-	};
-	
-
 	"my_variable"_ = 100;
 	// Also supports other literals:
 	123_ = "Hello, World!";
