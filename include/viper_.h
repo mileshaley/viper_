@@ -41,7 +41,7 @@ namespace viper_ {
 			: runtime_error(message) {
 		}
 	}; // class type_error
-} //namespace viper_
+} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Type Hints                                                                *
@@ -61,7 +61,40 @@ namespace viper_ {
 	template<typename T>
 	hint(T) -> hint<T>;
 
-} //namespace viper_
+} // namespace viper_
+
+/*~-------------------------------------------------------------------------~*\
+ * Values                                                                    *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class value {
+	public:
+		value(std::any&& data, bool is_data_mutable)
+			: m_data(std::move(data))
+			, m_mutable(is_data_mutable)
+		{
+		}
+
+		bool is_mutable() const {
+			return m_mutable;
+		}
+
+		inline std::type_info const& type() const {
+			return m_data.type();
+		}
+
+		std::any const& data() const {
+			return m_data;
+		}
+
+	private:
+		std::any m_data;
+		bool m_mutable;
+	}; // class value
+
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Variables                                                                 *
@@ -70,12 +103,11 @@ namespace viper_ {
 namespace viper_::detail {
 
 	class variable {
-			// Lifecycle
-	public: // ---------
+	public: // Lifecycle
 
 		variable()
-			: m_data()
-			, m_alive(false)
+			: m_value()
+			, m_active(false)
 			, m_hint()
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
@@ -84,8 +116,8 @@ namespace viper_::detail {
 		}
 
 		variable(variable const& other)
-			: m_data(other.m_data)
-			, m_alive(other.m_alive)
+			: m_value(other.m_value)
+			, m_active(other.m_active)
 			, m_hint(other.m_hint)
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
@@ -93,30 +125,50 @@ namespace viper_::detail {
 		{
 		}
 
-			// Assignment Operators
-	public: // --------------------
+	public: // Assignment Operators
 
+		//inline variable& operator=(variable const& rhs) {
+		//	if (this == &rhs) { return *this; }
+		//	check_assignment_type(rhs.m_value->type());
+		//	m_value = rhs.m_value;
+		//	create();
+		//	return *this;
+		//}
+
+		//template<typename T>
+		///// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
+		//inline variable& operator=(T rhs) {
+		//	// Explicitly instantiate T
+		//	(void)sizeof(instantiate_type<T>);
+		//	check_assignment_type(typeid(std::decay_t<T>));
+		//	m_value = rhs;
+		//	create();
+		//	return *this;
+		//}
+
+		// Rebind variable name to the value of another variable
 		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
-			check_assignment_type(rhs.m_data.type());
-			m_data = rhs.m_data;
+			
+			//check_assignment_type(rhs.m_value->type());
+			m_last_assignment = rhs.m_value;
 			create();
 			return *this;
 		}
 
 		template<typename T>
 		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
-		inline variable& operator=(T rhs) {
-			// Explicitly instantiate T
+		inline variable& operator=(T const& rhs) {
+			// Explicitly instantiate reflection for T 
 			(void)sizeof(instantiate_type<T>);
-			check_assignment_type(typeid(std::decay_t<T>));
-			m_data = rhs;
+			//check_assignment_type(typeid(std::decay_t<T>));
+			m_last_assignment = std::make_shared<value>(rhs, true);
 			create();
 			return *this;
 		}
 
-			// Access Operator
-	public: // ---------------
+			
+	public: // Access Operator
 
 		// To avoid issues with literal operator followed by .
 		inline variable* operator->() {
@@ -124,8 +176,8 @@ namespace viper_::detail {
 		}
 
 
-			// Variable Linking
-	public: // ----------------
+			
+	public: // Variable Linking
 
 		// Link two variables together
 		inline variable& operator,(variable& rhs) {
@@ -155,8 +207,8 @@ namespace viper_::detail {
 		inline variable* next_link() {
 			return m_next_link;
 		}
-			// Parameter Utilities
-	public: // -------------------
+			
+	public: // Parameter Utilities
 
 		inline bool is_parameter() const {
 			return m_parameter;
@@ -165,67 +217,80 @@ namespace viper_::detail {
 			m_parameter = new_state;
 		}
 
-			// Type Hinting
-	public: // ------------
+	public: // Type Hinting
 
 		// This one doesn't work yet due to operator precedence
-		// It can be fixed if hint<T> is given an operator= that returns a proxy viper
+		// It can be fixed if hint<T> is given an operator= that returns a proxy variable
 		//template<typename T>
 		//inline variable& operator=(hint<T>) {
 		//	return this->hint<T>();
 		//}
 
-		template<typename T>
-		inline constexpr variable& operator^(hint<T>) {
-			return this->hint<T>();
-		}
+		//template<typename T>
+		//inline constexpr variable& operator^(hint<T>) {
+		//	return this->hint<T>();
+		//}
 
-		template<typename T>
-		inline constexpr variable& operator^(T) {
-			return this->hint<T>();
-		}
+		//template<typename T>
+		//inline constexpr variable& operator^(T) {
+		//	return this->hint<T>();
+		//}
 
-		template<typename T>
-		inline variable& hint() {
-			// Explicitly instantiate T
-			using instantiated = instantiate_type<T>;
-			static instantiated g{};
-			if (m_alive) {
-				throw type_error("Cannot hint an initalized variable's type");
-			}
-			if (m_hint != nullptr) {
-				throw type_error("Cannot hint a variable's type more than once");
-			}
-			m_hint = &typeid(std::decay_t<T>);
-			return *this;
-		}
+		//template<typename T>
+		//inline variable& hint() {
+		//	// Explicitly instantiate T
+		//	using instantiated = instantiate_type<T>;
+		//	static instantiated g{};
+		//	if (m_active) {
+		//		throw type_error("Cannot hint an initalized variable's type");
+		//	}
+		//	if (m_hint != nullptr) {
+		//		throw type_error("Cannot hint a variable's type more than once");
+		//	}
+		//	m_hint = &typeid(std::decay_t<T>);
+		//	return *this;
+		//}
 
-			// Utility //
-	public: // ------- //
+			
+	public: // Utility
 
 		std::any const& data() const {
-			return m_data;
+			return read_value().data();
 		}
 
 		inline size_t type_hash_code() const {
-			return m_data.type().hash_code();
+			return read_value().type().hash_code();
 		}
 
 		inline void create() {
-			m_alive = true;
+			m_active = true;
 		}
 
 		inline void destroy() {
-			m_alive = false;
+			m_active = false;
 			m_hint = nullptr;
-			m_data.reset();
+			m_value.reset();
+			m_last_assignment.reset();
 		}
-			 // Helpers //
-	private: // ------- //
+			 
+	private: // Helpers
+
+		// Accept the last assignment and read the referenced value
+		inline value const& read_value() const {
+			accept_last_assignment();
+			return *m_value;
+		}
+
+		inline void accept_last_assignment() const {
+			if (m_last_assignment != nullptr) {
+				m_value = m_last_assignment;
+				m_last_assignment.reset();
+			}
+		}
 
 		inline void check_assignment_type(std::type_info const& new_type) {
-			if (m_alive) {
-				if (m_data.type() != new_type) {
+			if (m_active) {
+				if (m_value->type() != new_type) {
 					throw type_error("Variable type was reassigned");
 				}
 			} else if (m_hint != nullptr && *m_hint != new_type) {
@@ -233,13 +298,15 @@ namespace viper_::detail {
 			}
 		}
 
-			 // Member Variables //
-	private: // ---------------- //
+			
+	private: // Member Variables
+		mutable std::shared_ptr<value> m_value;
+		mutable std::shared_ptr<value> m_last_assignment;
 
-		std::any m_data;
 		std::type_info const* m_hint;
-		bool m_alive;
+		bool m_active;
 		bool m_parameter;
+
 		variable* m_previous_link;
 		variable* m_next_link;
 
@@ -262,15 +329,15 @@ namespace viper_::detail {
 		}
 
 		inline variable_storage()
-			: m_data()
+			: m_value()
 		{}
 
 		inline map_type& map() {
-			return m_data;
+			return m_value;
 		}
 
 	private:
-		map_type m_data;
+		map_type m_value;
 	}; // class variable_storage
 
 } //namespace viper_::detail
@@ -362,16 +429,16 @@ namespace viper_::detail {
 		type_record_storage() = default;
 
 		inline map_type& map() {
-			return m_data;
+			return m_value;
 		}
 
 		template<typename T>
 		inline void register_type(size_t key) {
-			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
+			m_value.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
 		}
 
 	private:
-		map_type m_data;
+		map_type m_value;
 	}; // class type_record_storage
 
 } //namespace viper_::detail
