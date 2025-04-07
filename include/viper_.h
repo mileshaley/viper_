@@ -72,8 +72,6 @@ namespace viper_::detail {
 	class variable {
 			// Lifecycle
 	public: // ---------
-		variable(variable const&) = delete;
-		variable(variable&&) = delete;
 
 		variable()
 			: m_data()
@@ -82,6 +80,16 @@ namespace viper_::detail {
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
 			, m_parameter(false)
+		{
+		}
+
+		variable(variable const& other)
+			: m_data(other.m_data)
+			, m_alive(other.m_alive)
+			, m_hint(other.m_hint)
+			, m_next_link(nullptr)
+			, m_previous_link(nullptr)
+			, m_parameter(other.m_parameter)
 		{
 		}
 
@@ -100,8 +108,7 @@ namespace viper_::detail {
 		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
 		inline variable& operator=(T rhs) {
 			// Explicitly instantiate T
-			using instantiated = instantiate_type<T>;
-			static instantiated g2{};
+			(void)sizeof(instantiate_type<T>);
 			check_assignment_type(typeid(std::decay_t<T>));
 			m_data = rhs;
 			create();
@@ -432,13 +439,17 @@ namespace viper_::literals {
 namespace viper_::detail {
 	class function {
 	public:
-		using callable_type = std::function<variable(function&)>;
+		using callable_signature = variable(function&);
+		using callable_type = std::function<callable_signature>;
 
 		inline function(std::string&& name, std::vector<variable*>&& parameters, callable_type&& callable)
 			: m_name(move(name))
 			, m_parameters(move(parameters))
 			, m_callable(move(callable))
 		{
+			for (variable* parameter : m_parameters) {
+				parameter->set_as_parameter(true);
+			}
 			//if (m_parameters != nullptr) {
 			//	variable* end_link = m_parameters->chain_end();
 			//	// Traverse the chain of parameters backwards since the
@@ -449,9 +460,18 @@ namespace viper_::detail {
 			//}
 		}
 
-		variable operator()(variable& parameters) {
+		inline ~function() {
+			for (variable* parameter : m_parameters) {
+				parameter->set_as_parameter(false);
+			}
+		}
+
+		template<class... Variables>
+		inline variable operator()(Variables&... parameters) {
 			(void)parameters;
 		}
+
+		std::string const& __name__ = m_name;
 
 	private:
 		std::string m_name;
@@ -459,6 +479,7 @@ namespace viper_::detail {
 		callable_type m_callable;
 	}; // class function
 
+	// Helper class used in making a complete function object within the def macro
 	class function_builder {
 	public:
 		inline function_builder(const char* name)
@@ -538,7 +559,7 @@ namespace viper_::detail {
 				}
 
 				out.replace(begin_format, i - begin_format + 1, data_string);
-				i += variable_length - 2; // -2 to account for {}
+				i += variable_length - 2; // -2 to account for the {}
 			}
 		}
 	}
@@ -554,8 +575,12 @@ namespace viper_ {
 			detail::format_string_in_place(m_formatted);
 		}
 
-		inline std::string const& get_formatted() const {
+		inline std::string const& formatted() const {
 			return m_formatted;
+		}
+
+		inline std::string const& raw() const {
+			return m_raw;
 		}
 
 		inline operator std::string const& () const {
@@ -677,10 +702,11 @@ namespace viper_::detail {
 	}; // class underscore_proxy
 } // namespace viper_::detail
 
-// Intentionally located in the global namespace so _ macro can name either
-// this or the macro depending on if parenthesis are present after the identifier
+// Intentionally located in the global namespace so _ macro can name this, the literal operator,
+// or the macro depending on if parenthesis are present after the identifier
 static inline viper_::detail::underscore_proxy _VIPER_UNDERSCORE;
 
+// Has a leading underscore so that the name can also be used for a user-defined literal operator
 #define _VIPER_UNDERSCORE(Type) VIPER_HINT(Type)
 
 /*~-------------------------------------------------------------------------~*\
@@ -705,12 +731,9 @@ namespace viper_ {
 
 #define VIPER_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
 
-#define VIPER_DEF_INTERNAL(...) std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_DEF_INTERNAL(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
 
 #define VIPER_DEF(Name) ; ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_DEF_INTERNAL
-
-//#define VIPER_DEF_INTERNAL(...) {__VA_ARGS__}.m_function = 
-//#define VIPER_DEF(Name) funcptr_map()[VIPER_FILENAME] ::viper_::detail::function& Name = func_map()[VIPER_FILELINE] = viper_::detail::function VIPER_DEF_INTERNAL
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -740,3 +763,14 @@ namespace viper_ {
 	#define f VIPER_FORMAT
 	#define def VIPER_DEF
 #endif // !defined(VIPER_NO_MACRO_POLLUTION)
+
+
+/*~-------------------------------------------------------------------------~*\
+ * Upcoming Features                                                         *
+\*~-------------------------------------------------------------------------~*/
+
+// import
+// classes
+// modules and __name__
+// exec() with dlls
+// help()
