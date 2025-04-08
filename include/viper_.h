@@ -106,67 +106,61 @@ namespace viper_::detail {
 	public: // Lifecycle
 
 		variable()
-			: m_value()
+			: m_data()
 			, m_active(false)
 			, m_hint()
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
-			, m_parameter(false)
 		{
 		}
 
 		variable(variable const& other)
-			: m_value(other.m_value)
+			: m_data(other.m_data)
 			, m_active(other.m_active)
 			, m_hint(other.m_hint)
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
-			, m_parameter(other.m_parameter)
 		{
 		}
 
+		variable(variable&& other) noexcept
+			: m_data(std::move(other.m_data))
+			, m_active(std::exchange(other.m_active, false))
+			, m_hint(std::exchange(other.m_hint, nullptr))
+			, m_next_link(std::exchange(other.m_next_link, nullptr))
+			, m_previous_link(std::exchange(other.m_next_link, nullptr))
+		{
+			if (m_previous_link) {
+				m_previous_link->m_next_link = this;
+			}
+			if (m_next_link) {
+				m_next_link->m_previous_link = this;
+			}
+		}
+
+		~variable() {}
+
 	public: // Assignment Operators
-
-		//inline variable& operator=(variable const& rhs) {
-		//	if (this == &rhs) { return *this; }
-		//	check_assignment_type(rhs.m_value->type());
-		//	m_value = rhs.m_value;
-		//	create();
-		//	return *this;
-		//}
-
-		//template<typename T>
-		///// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
-		//inline variable& operator=(T rhs) {
-		//	// Explicitly instantiate T
-		//	(void)sizeof(instantiate_type<T>);
-		//	check_assignment_type(typeid(std::decay_t<T>));
-		//	m_value = rhs;
-		//	create();
-		//	return *this;
-		//}
 
 		// Rebind variable name to the value of another variable
 		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
-			
-			//check_assignment_type(rhs.m_value->type());
-			m_last_assignment = rhs.m_value;
+			//check_assignment_type(rhs.m_internal_value->type());
+			m_data.assign(rhs.m_data.get());
 			create();
 			return *this;
 		}
 
+		/// TODO: rhs has to be passed by value otherwise T will be innacurate when const. Find a fix
 		template<typename T>
-		/// TODO: Consider fixing pass by value (requires fixing constness type deduction issue)
-		inline variable& operator=(T const& rhs) {
+		inline variable& operator=(T rhs) {
 			// Explicitly instantiate reflection for T 
 			(void)sizeof(instantiate_type<T>);
 			//check_assignment_type(typeid(std::decay_t<T>));
-			m_last_assignment = std::make_shared<value>(rhs, true);
+			m_data.assign(std::make_shared<value>(rhs, true));
 			create();
 			return *this;
 		}
-
 			
 	public: // Access Operator
 
@@ -175,8 +169,6 @@ namespace viper_::detail {
 			return this;
 		}
 
-
-			
 	public: // Variable Linking
 
 		// Link two variables together
@@ -208,14 +200,14 @@ namespace viper_::detail {
 			return m_next_link;
 		}
 			
-	public: // Parameter Utilities
-
-		inline bool is_parameter() const {
-			return m_parameter;
-		}
-		inline void set_as_parameter(bool new_state = true) {
-			m_parameter = new_state;
-		}
+	//public: // Parameter Utilities
+	//
+	//	inline bool is_parameter() const {
+	//		return m_parameter;
+	//	}
+	//	inline void set_as_parameter(bool new_state = true) {
+	//		m_parameter = new_state;
+	//	}
 
 	public: // Type Hinting
 
@@ -254,13 +246,15 @@ namespace viper_::detail {
 			
 	public: // Utility
 
-		std::any const& data() const {
-			return read_value().data();
+		inline std::any const& data() const {
+			return m_data.get()->data();
 		}
 
 		inline size_t type_hash_code() const {
-			return read_value().type().hash_code();
+			return m_data.get()->type().hash_code();
 		}
+			 
+	private: // Helpers
 
 		inline void create() {
 			m_active = true;
@@ -269,48 +263,97 @@ namespace viper_::detail {
 		inline void destroy() {
 			m_active = false;
 			m_hint = nullptr;
-			m_value.reset();
-			m_last_assignment.reset();
-		}
-			 
-	private: // Helpers
-
-		// Accept the last assignment and read the referenced value
-		inline value const& read_value() const {
-			accept_last_assignment();
-			return *m_value;
+			m_data = data_state();
 		}
 
-		inline void accept_last_assignment() const {
-			if (m_last_assignment != nullptr) {
-				m_value = m_last_assignment;
-				m_last_assignment.reset();
-			}
-		}
-
-		inline void check_assignment_type(std::type_info const& new_type) {
-			if (m_active) {
-				if (m_value->type() != new_type) {
-					throw type_error("Variable type was reassigned");
-				}
-			} else if (m_hint != nullptr && *m_hint != new_type) {
-				throw type_error("Variable type does not match hint type");
-			}
-		}
+		//inline void check_assignment_type(std::type_info const& new_type) {
+		//	if (m_active) {
+		//		if (m_internal_value->type() != new_type) {
+		//			throw type_error("Variable type was reassigned");
+		//		}
+		//	} else if (m_hint != nullptr && *m_hint != new_type) {
+		//		throw type_error("Variable type does not match hint type");
+		//	}
+		//}
 
 			
 	private: // Member Variables
-		mutable std::shared_ptr<value> m_value;
-		mutable std::shared_ptr<value> m_last_assignment;
+
+		// Encapsulate the state of value pointers
+		class data_state {
+		public:
+			data_state()
+				: m_value(nullptr)
+				, m_last_assignment(nullptr)
+			{}
+
+			inline void assign(std::shared_ptr<value> const& new_value) {
+				m_last_assignment = new_value;
+			}
+
+			inline void accept_last_assignment() const {
+				if (m_last_assignment != nullptr) {
+					m_value = m_last_assignment;
+					m_last_assignment.reset();
+				}
+			}
+
+			inline std::shared_ptr<value> const& get() const {
+				accept_last_assignment();
+				return m_value;
+			}
+
+		private:
+			mutable std::shared_ptr<value> m_value;
+			mutable std::shared_ptr<value> m_last_assignment;
+		};
+
+		data_state m_data;
 
 		std::type_info const* m_hint;
 		bool m_active;
-		bool m_parameter;
 
 		variable* m_previous_link;
 		variable* m_next_link;
 
 	}; // class variable
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Variable Stack                                                            *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class variable_stack {
+	public:
+		variable_stack() 
+			: m_data(1)
+		{}
+
+		void pop() {
+			if (m_data.size() <= 1llu) {
+				m_data.pop_back();
+			}
+		}
+
+		variable& push() {
+			return m_data.emplace_back();
+		}
+
+		variable& top() {
+			return m_data.back();
+		}
+
+		variable const& top() const {
+			return m_data.back();
+		}
+	private:
+		/// TODO: We might want stable pointers eventually so we would probably use an internal linked list in variables in that case
+		// A little costly but its okay for now
+		std::vector<variable> m_data;
+	}; // class variable_storage
 
 } // namespace viper_::detail
 
@@ -322,25 +365,25 @@ namespace viper_::detail {
 
 	class variable_storage {
 	public:
-		using map_type = std::unordered_map<std::string, variable>;
+		using map_type = std::unordered_map<std::string, variable_stack>;
 		static inline variable_storage& global_context() {
 			static variable_storage storage{};
 			return storage;
 		}
 
 		inline variable_storage()
-			: m_value()
+			: m_data()
 		{}
 
 		inline map_type& map() {
-			return m_value;
+			return m_data;
 		}
 
 	private:
-		map_type m_value;
+		map_type m_data;
 	}; // class variable_storage
 
-} //namespace viper_::detail
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * String Representation of Data                                             *
@@ -429,16 +472,16 @@ namespace viper_::detail {
 		type_record_storage() = default;
 
 		inline map_type& map() {
-			return m_value;
+			return m_data;
 		}
 
 		template<typename T>
 		inline void register_type(size_t key) {
-			m_value.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
+			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
 		}
 
 	private:
-		map_type m_value;
+		map_type m_data;
 	}; // class type_record_storage
 
 } //namespace viper_::detail
@@ -463,7 +506,7 @@ namespace viper_::detail {
 	template<typename T>
 	class instantiate_type {
 	public:
-		static inline type_instatiatior<T> global_instantiator{};
+		static inline const type_instatiatior<T> global_instantiator{};
 	}; // class type_instatiatior
 
 } // namespace viper_::detail
@@ -474,27 +517,27 @@ namespace viper_::detail {
 
 namespace viper_::literals {
 	inline detail::variable& operator""_(const char* string, size_t length) {
-		return detail::variable_storage::global_context().map()[std::string(string, length)];
+		return detail::variable_storage::global_context().map()[std::string(string, length)].top();
 	}
 
 	inline detail::variable& operator""_(uint64_t integer) {
-		return detail::variable_storage::global_context().map()[std::to_string(integer)];
+		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
 	}
 
 	inline detail::variable& operator""_(long double floating) {
-		return detail::variable_storage::global_context().map()[std::to_string(floating)];
+		return detail::variable_storage::global_context().map()[std::to_string(floating)].top();
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
-		return detail::variable_storage::global_context().map()[std::string(string, length)];
+		return detail::variable_storage::global_context().map()[std::string(string, length)].top();
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(uint64_t integer) {
-		return detail::variable_storage::global_context().map()[std::to_string(integer)];
+		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(long double floating) {
-		return detail::variable_storage::global_context().map()[std::to_string(floating)];
+		return detail::variable_storage::global_context().map()[std::to_string(floating)].top();
 	}
 
 } // namespace viper_::literals
@@ -514,9 +557,9 @@ namespace viper_::detail {
 			, m_parameters(move(parameters))
 			, m_callable(move(callable))
 		{
-			for (variable* parameter : m_parameters) {
-				parameter->set_as_parameter(true);
-			}
+			//for (variable* parameter : m_parameters) {
+			//	parameter->set_as_parameter(true);
+			//}
 			//if (m_parameters != nullptr) {
 			//	variable* end_link = m_parameters->chain_end();
 			//	// Traverse the chain of parameters backwards since the
@@ -528,9 +571,9 @@ namespace viper_::detail {
 		}
 
 		inline ~function() {
-			for (variable* parameter : m_parameters) {
-				parameter->set_as_parameter(false);
-			}
+			//for (variable* parameter : m_parameters) {
+			//	parameter->set_as_parameter(false);
+			//}
 		}
 
 		template<class... Variables>
@@ -619,9 +662,9 @@ namespace viper_::detail {
 
 				auto var_it = var_map.find(out.substr(begin_format + 1llu, variable_length));
 				if (var_it != var_map.end()) {
-					auto type_it = type_map.find(var_it->second.type_hash_code());
+					auto type_it = type_map.find(var_it->second.top().type_hash_code());
 					if (type_it != type_map.end()) {
-						data_string = type_it->second->get_string_data(var_it->second.data());
+						data_string = type_it->second->get_string_data(var_it->second.top().data());
 					}
 				}
 
@@ -795,12 +838,13 @@ namespace viper_ {
 #define VIPER_ELIF else if
 #define VIPER_EXCEPT catch
 #define VIPER_FORMAT (::viper_::format_string)
+#define VIPER_COLON
 
-#define VIPER_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
+#define VIPER_INTERNAL_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
 
-#define VIPER_DEF_INTERNAL(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_INTERNAL_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
 
-#define VIPER_DEF(Name) ; ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_DEF_INTERNAL
+#define VIPER_DEF(Name) ; ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_DEF
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -829,6 +873,8 @@ namespace viper_ {
 	#define except VIPER_EXCEPT
 	#define f VIPER_FORMAT
 	#define def VIPER_DEF
+
+	#define col VIPER_COLON
 #endif // !defined(VIPER_NO_MACRO_POLLUTION)
 
 
