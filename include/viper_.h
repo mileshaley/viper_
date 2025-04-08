@@ -524,8 +524,8 @@ namespace viper_::literals {
 		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
 	}
 
-	inline detail::variable& operator""_(long double floating) {
-		return detail::variable_storage::global_context().map()[std::to_string(floating)].top();
+	inline detail::variable& operator""_(long double real) {
+		return detail::variable_storage::global_context().map()[std::to_string(real)].top();
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
@@ -536,8 +536,8 @@ namespace viper_::literals {
 		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
 	}
 
-	inline detail::variable& operator""_VIPER_UNDERSCORE(long double floating) {
-		return detail::variable_storage::global_context().map()[std::to_string(floating)].top();
+	inline detail::variable& operator""_VIPER_UNDERSCORE(long double real) {
+		return detail::variable_storage::global_context().map()[std::to_string(real)].top();
 	}
 
 } // namespace viper_::literals
@@ -549,31 +549,16 @@ namespace viper_::literals {
 namespace viper_::detail {
 	class function {
 	public:
-		using callable_signature = variable(function&);
-		using callable_type = std::function<callable_signature>;
+		using callable_type = std::function<variable(function&)>;
 
 		inline function(std::string&& name, std::vector<variable*>&& parameters, callable_type&& callable)
 			: m_name(move(name))
 			, m_parameters(move(parameters))
 			, m_callable(move(callable))
 		{
-			//for (variable* parameter : m_parameters) {
-			//	parameter->set_as_parameter(true);
-			//}
-			//if (m_parameters != nullptr) {
-			//	variable* end_link = m_parameters->chain_end();
-			//	// Traverse the chain of parameters backwards since the
-			//	// linking operator (,) will return the last link in the sequence
-			//	for (variable* link = end_link; link != nullptr; link = link->previous_link()) {
-			//		link->set_as_parameter(true);
-			//	}
-			//}
 		}
 
 		inline ~function() {
-			//for (variable* parameter : m_parameters) {
-			//	parameter->set_as_parameter(false);
-			//}
 		}
 
 		template<class... Variables>
