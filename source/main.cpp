@@ -6,6 +6,8 @@
 int main() {
 	
 	def (foo)("param1"_ = "Hello, ", "param2"_ = "World!") {
+	
+	
 	}
 
 	def (bar)() {

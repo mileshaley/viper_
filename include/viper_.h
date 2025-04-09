@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <any>
 #include <functional>
+#include <list>
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -102,33 +103,41 @@ namespace viper_::detail {
 
 namespace viper_::detail {
 
+	class variable_stack;
+
 	class variable {
 	public: // Lifecycle
 
 		variable()
 			: m_data()
-			, m_active(false)
 			, m_hint()
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
+			, m_owner(nullptr)
+			, m_active(false)
+			, m_unpack_count(0)
 		{
 		}
 
 		variable(variable const& other)
 			: m_data(other.m_data)
-			, m_active(other.m_active)
 			, m_hint(other.m_hint)
 			, m_next_link(nullptr)
 			, m_previous_link(nullptr)
+			, m_owner(nullptr)
+			, m_active(other.m_active)
+			, m_unpack_count(0)
 		{
 		}
 
 		variable(variable&& other) noexcept
 			: m_data(std::move(other.m_data))
-			, m_active(std::exchange(other.m_active, false))
 			, m_hint(std::exchange(other.m_hint, nullptr))
 			, m_next_link(std::exchange(other.m_next_link, nullptr))
 			, m_previous_link(std::exchange(other.m_next_link, nullptr))
+			, m_owner(nullptr)
+			, m_active(std::exchange(other.m_active, false))
+			, m_unpack_count(0)
 		{
 			if (m_previous_link) {
 				m_previous_link->m_next_link = this;
@@ -139,6 +148,14 @@ namespace viper_::detail {
 		}
 
 		~variable() {}
+
+		inline void set_owner(variable_stack* owner) {
+			m_owner = owner;
+		}
+
+		inline variable_stack* get_owner() {
+			return m_owner;
+		}
 
 	public: // Assignment Operators
 
@@ -166,6 +183,15 @@ namespace viper_::detail {
 
 		// To avoid issues with literal operator followed by .
 		inline variable* operator->() {
+			return this;
+		}
+
+	public: // Unpacking Operator
+
+		inline variable* operator*() {
+			if (++m_unpack_count > 2) {
+				throw std::runtime_error("Variable unpacked more than twice.");
+			}
 			return this;
 		}
 
@@ -253,6 +279,14 @@ namespace viper_::detail {
 		inline size_t type_hash_code() const {
 			return m_data.get()->type().hash_code();
 		}
+
+		inline std::shared_ptr<value> steal_last_assignment() {
+			return m_data.steal_last_assignment();
+		}
+
+		inline uint8_t steal_unpack_count() {
+			return std::exchange(m_unpack_count, uint8_t(0));
+		}
 			 
 	private: // Helpers
 
@@ -303,6 +337,10 @@ namespace viper_::detail {
 				return m_value;
 			}
 
+			inline std::shared_ptr<value> steal_last_assignment() {
+				return std::exchange(m_last_assignment, std::shared_ptr<value>());
+			}
+
 		private:
 			mutable std::shared_ptr<value> m_value;
 			mutable std::shared_ptr<value> m_last_assignment;
@@ -311,11 +349,12 @@ namespace viper_::detail {
 		data_state m_data;
 
 		std::type_info const* m_hint;
-		bool m_active;
-
 		variable* m_previous_link;
 		variable* m_next_link;
+		variable_stack* m_owner;
 
+		bool m_active;
+		uint8_t m_unpack_count;
 	}; // class variable
 
 } // namespace viper_::detail
@@ -330,7 +369,9 @@ namespace viper_::detail {
 	public:
 		variable_stack() 
 			: m_data(1)
-		{}
+		{
+			m_data.back().set_owner(this);
+		}
 
 		void pop() {
 			if (m_data.size() <= 1llu) {
@@ -339,7 +380,9 @@ namespace viper_::detail {
 		}
 
 		variable& push() {
-			return m_data.emplace_back();
+			variable& new_variable = m_data.emplace_back();
+			new_variable.set_owner(this);
+			return new_variable;
 		}
 
 		variable& top() {
@@ -349,10 +392,9 @@ namespace viper_::detail {
 		variable const& top() const {
 			return m_data.back();
 		}
+
 	private:
-		/// TODO: We might want stable pointers eventually so we would probably use an internal linked list in variables in that case
-		// A little costly but its okay for now
-		std::vector<variable> m_data;
+		std::list<variable> m_data;
 	}; // class variable_storage
 
 } // namespace viper_::detail
@@ -548,31 +590,150 @@ namespace viper_::literals {
 
 namespace viper_::detail {
 	class function {
+		enum class parameter_type : int8_t {
+			positional = 0,
+			positional_with_default,
+			positional_args,
+			keyword,
+			keyword_with_default,
+			keyword_args
+		};
+
 	public:
 		using callable_type = std::function<variable(function&)>;
 
-		inline function(std::string&& name, std::vector<variable*>&& parameters, callable_type&& callable)
+		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
 			: m_name(move(name))
-			, m_parameters(move(parameters))
+			, m_parameters(parameters.size())
 			, m_callable(move(callable))
 		{
+			enum parameter_phase : int {
+				positional = 0,
+				positional_with_default,
+				keyword_args,
+				finished
+			} phase = positional;
+
+
+			// Ensures we steal all last assignments and unpack counts from the 
+			// parameters (effectively resetting them to before the function was declared) in case of an error
+			for (size_t i = 0; i < parameters.size(); ++i) {
+				m_parameters[i].variable = parameters[i]->get_owner();
+				m_parameters[i].default_value = parameters[i]->steal_last_assignment();
+				m_parameters[i].type = parameter_type::positional;
+				m_parameters[i].unpack_count = parameters[i]->steal_unpack_count();
+
+			}
+
+			for (size_t i = 0; i < parameters.size(); ++i) {
+				parameter& parameter = m_parameters[i];
+
+				const auto handle_unpack_counts = [&]() {
+					if (parameter.unpack_count == 1) {
+						if (phase >= keyword_args) {
+							throw std::runtime_error("*arguments cannot appear more than once");
+						} else if (parameter.default_value) {
+							throw std::runtime_error("**keyword arguments cannot have a default value");
+						}
+						phase = keyword_args;
+						parameter.type = parameter_type::keyword_args;
+					} else if (parameter.unpack_count == 2) {
+						if (parameter.default_value) {
+							throw std::runtime_error("*arguments cannot have a default value");
+						}
+						// Args after **kwargs error handled below in finished case of phase switch
+						phase = finished;
+						parameter.type = parameter_type::keyword_args;
+					} else if (parameter.unpack_count >= 3) {
+						throw std::runtime_error("Cannot put more than two '*' on an argument");
+					}
+					if (parameter.unpack_count >= 2) {
+						phase = finished;
+						parameter.type = parameter_type::keyword_args;
+					} else if (parameter.unpack_count >= 1) {
+						phase = keyword_args;
+						parameter.type = parameter_type::keyword_args;
+					} // else phase stays the same
+				};
+
+				switch (phase) {
+				case positional:
+					handle_unpack_counts();
+					if (parameter.default_value) {
+						phase = positional_with_default;
+					}
+					break;
+				case positional_with_default:
+					handle_unpack_counts();
+					if (!parameter.default_value) {
+						throw std::runtime_error("Argument without default value cannot follow arguments with default values");
+					}
+					break;
+				case keyword_args:
+					handle_unpack_counts();
+					break;
+				case finished:
+					throw std::runtime_error("Additional arguments not allowed after **kwargs");
+				}
+			}
 		}
 
-		inline ~function() {
-		}
+		inline ~function() = default;
 
-		template<class... Variables>
-		inline variable operator()(Variables&... parameters) {
-			(void)parameters;
+		template<class... Args>
+		inline variable operator()(Args const&... args) {
+			for (auto const& [variable] : m_parameters) {
+				variable->push();
+			}
+
+			const auto pop_variables = [&]() {
+				for (auto const& [variable] : m_parameters) {
+					variable->pop();
+				}
+			};
+
+			try {
+				preprocess_args<0, Args...>(args...);
+			} catch (std::runtime_error& error) {
+				pop_variables();
+				throw error;
+			}
+
+			pop_variables();
 		}
 
 		std::string const& __name__ = m_name;
 
 	private:
+		template<size_t Index, class First, class... Rest>
+		inline constexpr void preprocess_args(First const& first, Rest const&... rest) {
+			
+			std::decay_t<int> w;
+
+
+
+			if constexpr (sizeof...(Rest) > 0) {
+				preprocess_args<Index + 1, Rest...>(rest...);
+			}
+		}
+
+
+
+
+	private:
+		struct parameter {
+			variable_stack* variable;
+			std::shared_ptr<value> default_value;
+			parameter_type type;
+			uint8_t unpack_count;
+		};
+
 		std::string m_name;
-		std::vector<variable*> m_parameters;
+		std::vector<parameter> m_parameters;
 		callable_type m_callable;
 	}; // class function
+
+
 
 	// Helper class used in making a complete function object within the def macro
 	class function_builder {
@@ -601,13 +762,13 @@ namespace viper_::detail {
 		template<class Callable>
 		inline constexpr function operator+(Callable const& callable) {
 			if constexpr (returns_void<Callable>::value) {
-				return { move(m_name), move(m_parameters),
+				return { move(m_name), m_parameters,
 					[&](function& function) -> variable {
 						return variable(callable(function));
 					}
 				};
 			} else {
-				return { move(m_name), move(m_parameters),
+				return { move(m_name), m_parameters,
 					[&](function& function) -> variable {
 						callable(function);
 						return {};
