@@ -604,7 +604,7 @@ namespace viper_::detail {
 
 		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
 			: m_name(move(name))
-			, m_parameters(parameters.size())
+			, m_parameters()
 			, m_callable(move(callable))
 		{
 			enum parameter_phase : int {
@@ -615,20 +615,23 @@ namespace viper_::detail {
 			} phase = positional;
 
 
-			// Ensures we steal all last assignments and unpack counts from the 
-			// parameters (effectively resetting them to before the function was declared) in case of an error
-			for (size_t i = 0; i < parameters.size(); ++i) {
-				m_parameters[i].variable = parameters[i]->get_owner();
-				m_parameters[i].default_value = parameters[i]->steal_last_assignment();
-				m_parameters[i].type = parameter_type::positional;
-				m_parameters[i].unpack_count = parameters[i]->steal_unpack_count();
-
+			m_parameters.reserve(parameters.size());
+			// Ensures we steal all last assignments and unpack counts from the parameters,
+			// effectively resetting them to before the function was declared in case of an error downstream
+			for (variable* parameter : parameters) {
+				m_parameters.push_back({
+					parameter->get_owner(),
+					parameter->steal_last_assignment(),
+					parameter_type::positional,
+					parameter->steal_unpack_count()
+				});
 			}
 
 			for (size_t i = 0; i < parameters.size(); ++i) {
 				parameter& parameter = m_parameters[i];
 
-				const auto handle_unpack_counts = [&]() {
+				// Returns whether or not it changed the phase
+				const auto unpack_change_phase = [&]() -> bool {
 					if (parameter.unpack_count == 1) {
 						if (phase >= keyword_args) {
 							throw std::runtime_error("*arguments cannot appear more than once");
@@ -636,7 +639,8 @@ namespace viper_::detail {
 							throw std::runtime_error("**keyword arguments cannot have a default value");
 						}
 						phase = keyword_args;
-						parameter.type = parameter_type::keyword_args;
+						parameter.type = parameter_type::positional_args;
+						return true;
 					} else if (parameter.unpack_count == 2) {
 						if (parameter.default_value) {
 							throw std::runtime_error("*arguments cannot have a default value");
@@ -644,36 +648,40 @@ namespace viper_::detail {
 						// Args after **kwargs error handled below in finished case of phase switch
 						phase = finished;
 						parameter.type = parameter_type::keyword_args;
+						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw std::runtime_error("Cannot put more than two '*' on an argument");
 					}
-					if (parameter.unpack_count >= 2) {
-						phase = finished;
-						parameter.type = parameter_type::keyword_args;
-					} else if (parameter.unpack_count >= 1) {
-						phase = keyword_args;
-						parameter.type = parameter_type::keyword_args;
-					} // else phase stays the same
+					return false;
 				};
 
 				switch (phase) {
 				case positional:
-					handle_unpack_counts();
-					if (parameter.default_value) {
+					if (!unpack_change_phase() && parameter.default_value) {
 						phase = positional_with_default;
+						parameter.type = parameter_type::positional_with_default;
 					}
 					break;
 				case positional_with_default:
-					handle_unpack_counts();
-					if (!parameter.default_value) {
-						throw std::runtime_error("Argument without default value cannot follow arguments with default values");
+					if (!unpack_change_phase()) {
+						if (parameter.default_value) {
+							parameter.type = parameter_type::positional_with_default;
+						} else {
+							throw std::runtime_error("Argument without default value cannot follow arguments with default values");
+						}
 					}
 					break;
 				case keyword_args:
-					handle_unpack_counts();
+					if (!unpack_change_phase()) {
+						if (parameter.default_value) {
+							parameter.type = parameter_type::keyword_with_default;
+						} else {
+							parameter.type = parameter_type::keyword;
+						}
+					}
 					break;
 				case finished:
-					throw std::runtime_error("Additional arguments not allowed after **kwargs");
+					throw std::runtime_error("Additional arguments not allowed after **keyword arguments");
 				}
 			}
 		}
