@@ -395,8 +395,9 @@ namespace viper_::detail {
 
 	class variable_stack {
 	public:
-		variable_stack() 
+		variable_stack(std::string const& name) 
 			: m_data(1)
+			, m_name(name)
 		{
 			m_data.back().set_owner(this);
 		}
@@ -423,6 +424,7 @@ namespace viper_::detail {
 
 	private:
 		std::list<variable> m_data;
+		std::string m_name;
 	}; // class variable_storage
 
 } // namespace viper_::detail
@@ -445,8 +447,27 @@ namespace viper_::detail {
 			: m_data()
 		{}
 
-		inline map_type& map() {
-			return m_data;
+		inline variable_stack& get_stack(std::string const& name) {
+			return m_data.try_emplace(name, name).first->second;
+		}
+		inline variable& get(std::string const& name) {
+			return get_stack(name).top();
+		}
+
+		inline decltype(auto) find(std::string const& name) {
+			return m_data.find(name);
+		}
+
+		inline decltype(auto) find(std::string const& name) const {
+			return m_data.find(name);
+		}
+
+		inline decltype(auto) end() {
+			return m_data.end();
+		}
+
+		inline decltype(auto) end() const {
+			return m_data.end();
 		}
 
 	private:
@@ -454,6 +475,37 @@ namespace viper_::detail {
 	}; // class variable_storage
 
 } // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Variable Access Literal Operators                                         *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::literals {
+	inline detail::variable& operator""_(const char* string, size_t length) {
+		return detail::variable_storage::global_context().get(std::string(string, length));
+	}
+
+	inline detail::variable& operator""_(uint64_t integer) {
+		return detail::variable_storage::global_context().get(std::to_string(integer));
+	}
+
+	inline detail::variable& operator""_(long double real) {
+		return detail::variable_storage::global_context().get(std::to_string(real));
+	}
+
+	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
+		return detail::variable_storage::global_context().get(std::string(string, length));
+	}
+
+	inline detail::variable& operator""_VIPER_UNDERSCORE(uint64_t integer) {
+		return detail::variable_storage::global_context().get(std::to_string(integer));
+	}
+
+	inline detail::variable& operator""_VIPER_UNDERSCORE(long double real) {
+		return detail::variable_storage::global_context().get(std::to_string(real));
+	}
+
+} // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
  * Functions                                                                 *
@@ -500,7 +552,6 @@ namespace viper_::detail {
 				finished
 			} phase = positional;
 
-
 			m_parameters.reserve(parameters.size());
 			// Ensures we steal all last assignments and unpack counts from the parameters,
 			// effectively resetting them to before the function was declared in case of an error downstream
@@ -511,6 +562,8 @@ namespace viper_::detail {
 					parameter_type::positional,
 					parameter->steal_unpack_count(),
 				});
+				// Just in case we forget to steal something
+				parameter->reset_buffered_state();
 			}
 
 			for (size_t i = 0; i < parameters.size(); ++i) {
@@ -578,12 +631,18 @@ namespace viper_::detail {
 
 		template<class... Args>
 		inline variable operator()(Args const&... args) {
+			// We assume at first that all arguments passed are valid, meaning all parameter variables will need to be pushed
+			// Only wastes time if there is an exception in processing the arguments
 			for (parameter const& parameter : m_parameters) {
 				parameter.variable->push();
 				auto& variable = parameter.variable->top();
-				variable = parameter.default_value;
-				// Bypass assignment buffering since we just created this variable
-				variable.accept_last_assignment();
+				// Should only be a minor performance impact to doubly assign parameters that 
+				// have default values since we're just copying a shared pointer
+				if (parameter.default_value) {
+					variable = parameter.default_value;
+					// Bypass assignment buffering since we just created this variable
+					variable.accept_last_assignment();
+				}
 			}
 
 			// Declared as a lambda so it can be called in case process_arguments throws an error
@@ -623,21 +682,26 @@ namespace viper_::detail {
 
 		template<size_t Index, class T>
 		inline constexpr void process_argument(process_arguments_state& state, T const& argument) {
-			using enum process_arguments_state::argument_phase;
+			using argument_phase = process_arguments_state::argument_phase;
 			inline consteval bool is_variable = std::is_same_v<std::decay_t<T>, variable>;
 
-			switch (state.phase) {
-			case positional:
+			if (state.phase == argument_phase::positional) {
 				if constexpr (is_variable) {
-					if (value_ptr value = argument.steal_last_assignment()) {
-
+					value_ptr value = argument.steal_last_assignment();
+					if (value) {
+						state.phase = argument_phase::keyword;
 					}
 				} else {
 
 				}
-				break;
-			case keyword:
-				break;
+			} else /* if (state.phase == argument_phase::keyword) */ {
+				if constexpr (is_variable) {
+					if (value_ptr value = argument.steal_last_assignment()) {
+						state.phase = argument_phase::keyword;
+					}
+				} else {
+
+				}
 			}
 		}
 
@@ -848,37 +912,6 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
- * Literal Operators                                                         *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::literals {
-	inline detail::variable& operator""_(const char* string, size_t length) {
-		return detail::variable_storage::global_context().map()[std::string(string, length)].top();
-	}
-
-	inline detail::variable& operator""_(uint64_t integer) {
-		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
-	}
-
-	inline detail::variable& operator""_(long double real) {
-		return detail::variable_storage::global_context().map()[std::to_string(real)].top();
-	}
-
-	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
-		return detail::variable_storage::global_context().map()[std::string(string, length)].top();
-	}
-
-	inline detail::variable& operator""_VIPER_UNDERSCORE(uint64_t integer) {
-		return detail::variable_storage::global_context().map()[std::to_string(integer)].top();
-	}
-
-	inline detail::variable& operator""_VIPER_UNDERSCORE(long double real) {
-		return detail::variable_storage::global_context().map()[std::to_string(real)].top();
-	}
-
-} // namespace viper_::literals
-
-/*~-------------------------------------------------------------------------~*\
  * Format Strings                                                            *
 \*~-------------------------------------------------------------------------~*/
 
@@ -894,15 +927,13 @@ namespace viper_::detail {
 				inside_format = false;
 				const int variable_length = i - begin_format - 1;
 
-				detail::variable_storage::map_type const& var_map
-					= detail::variable_storage::global_context().map();
-				detail::type_record_storage::map_type const& type_map
-					= detail::type_record_storage::global_context().map();
+				detail::variable_storage const& variables = detail::variable_storage::global_context();
+				detail::type_record_storage::map_type const& type_map = detail::type_record_storage::global_context().map();
 
 				std::string data_string = "";
 
-				auto var_it = var_map.find(out.substr(begin_format + 1llu, variable_length));
-				if (var_it != var_map.end()) {
+				auto var_it = variables.find(out.substr(begin_format + 1llu, variable_length));
+				if (var_it != variables.end()) {
 					auto type_it = type_map.find(var_it->second.top().type_hash_code());
 					if (type_it != type_map.end()) {
 						data_string = type_it->second->get_string_data(var_it->second.top().data());
