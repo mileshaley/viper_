@@ -95,7 +95,25 @@ namespace viper_::detail {
 		bool m_mutable;
 	}; // class value
 
+	using value_ptr = std::shared_ptr<value>;
+
 } // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Utility                                                                   *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+	template<typename T>
+	class buffered_data {
+		using type = T;
+	public:
+
+
+	private:
+
+	};
+} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Variables                                                                 *
@@ -272,6 +290,11 @@ namespace viper_::detail {
 			
 	public: // Utility
 
+		inline void reset_buffered_state() {
+			(void)steal_last_assignment();
+			(void)steal_unpack_count();
+		}
+
 		inline std::any const& data() const {
 			return m_data.get()->data();
 		}
@@ -279,6 +302,11 @@ namespace viper_::detail {
 		inline size_t type_hash_code() const {
 			return m_data.get()->type().hash_code();
 		}
+
+		inline void accept_last_assignment() {
+			m_data.accept_last_assignment();
+		}
+
 
 		inline std::shared_ptr<value> steal_last_assignment() {
 			return m_data.steal_last_assignment();
@@ -425,6 +453,272 @@ namespace viper_::detail {
 		map_type m_data;
 	}; // class variable_storage
 
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Functions                                                                 *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class function {
+	private: // Common helper types
+		enum class parameter_type : int8_t {
+			positional = 0,
+			positional_with_default,
+			positional_args,
+			keyword,
+			keyword_with_default,
+			keyword_args
+		};
+
+		struct parameter {
+			variable_stack* variable;
+			value_ptr default_value;
+			parameter_type type;
+			uint8_t unpack_count;
+		};
+
+		struct process_arguments_state {
+			enum argument_phase : int8_t {
+				positional = 0,
+				keyword
+			} phase;
+		};
+
+	public: // Lifecycle
+		using callable_type = std::function<variable(function&)>;
+
+		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
+			: m_name(move(name))
+			, m_parameters()
+			, m_callable(move(callable))
+		{
+			enum parameter_phase : int {
+				positional = 0,
+				positional_with_default,
+				keyword_args,
+				finished
+			} phase = positional;
+
+
+			m_parameters.reserve(parameters.size());
+			// Ensures we steal all last assignments and unpack counts from the parameters,
+			// effectively resetting them to before the function was declared in case of an error downstream
+			for (variable* parameter : parameters) {
+				m_parameters.push_back({
+					parameter->get_owner(),
+					parameter->steal_last_assignment(),
+					parameter_type::positional,
+					parameter->steal_unpack_count(),
+				});
+			}
+
+			for (size_t i = 0; i < parameters.size(); ++i) {
+				parameter& parameter = m_parameters[i];
+
+				// Returns whether or not it changed the phase
+				const auto unpack_change_phase = [&]() -> bool {
+					if (parameter.unpack_count == 1) {
+						if (phase >= keyword_args) {
+							throw type_error("*arguments cannot appear more than once");
+						} else if (parameter.default_value) {
+							throw type_error("**keyword arguments cannot have a default value");
+						}
+						phase = keyword_args;
+						parameter.type = parameter_type::positional_args;
+						return true;
+					} else if (parameter.unpack_count == 2) {
+						if (parameter.default_value) {
+							throw type_error("*arguments cannot have a default value");
+						}
+						// Args after **kwargs error handled below in finished case of phase switch
+						phase = finished;
+						parameter.type = parameter_type::keyword_args;
+						return true;
+					} else if (parameter.unpack_count >= 3) {
+						throw type_error("Cannot put more than two '*' on an argument");
+					}
+					return false;
+				};
+
+				switch (phase) {
+				case positional:
+					if (!unpack_change_phase() && parameter.default_value) {
+						phase = positional_with_default;
+						parameter.type = parameter_type::positional_with_default;
+					}
+					break;
+				case positional_with_default:
+					if (!unpack_change_phase()) {
+						if (parameter.default_value) {
+							parameter.type = parameter_type::positional_with_default;
+						} else {
+							throw type_error("Argument without default value cannot follow arguments with default values");
+						}
+					}
+					break;
+				case keyword_args:
+					if (!unpack_change_phase()) {
+						if (parameter.default_value) {
+							parameter.type = parameter_type::keyword_with_default;
+						} else {
+							parameter.type = parameter_type::keyword;
+						}
+					}
+					break;
+				case finished:
+					throw type_error("Additional arguments not allowed after **keyword arguments");
+				}
+			}
+		}
+
+		inline ~function() = default;
+
+	public: // Calling
+
+		template<class... Args>
+		inline variable operator()(Args const&... args) {
+			for (parameter const& parameter : m_parameters) {
+				parameter.variable->push();
+				auto& variable = parameter.variable->top();
+				variable = parameter.default_value;
+				// Bypass assignment buffering since we just created this variable
+				variable.accept_last_assignment();
+			}
+
+			// Declared as a lambda so it can be called in case process_arguments throws an error
+			const auto reset_variables = [&]() {
+				for (parameter const& parameter : m_parameters) {
+					parameter.variable->pop();
+				}
+			};
+
+			try {
+				// Initialize a mutable state for process_arguments to work with
+				process_arguments_state state{
+					process_arguments_state::positional,
+
+				};
+				process_arguments<0, Args...>(state, args...);
+			} catch (...) {
+				reset_variables();
+				throw;
+			}
+
+			reset_variables();
+		}
+
+	private:
+
+		// Used by process_arguments to reset any remaining variable states in the event of an exception
+		template<class First, class... Rest>
+		inline constexpr void reset_passed_variable_states(First const& first, Rest const&... rest) {
+			if constexpr (std::is_same_v<std::decay_t<First>, variable>) {
+				first.reset_buffered_state();
+			}
+			if constexpr (sizeof...(Rest) > 0) {
+				reset_passed_variable_states<Rest...>(rest...);
+			}
+		}
+
+		template<size_t Index, class T>
+		inline constexpr void process_argument(process_arguments_state& state, T const& argument) {
+			using enum process_arguments_state::argument_phase;
+			inline consteval bool is_variable = std::is_same_v<std::decay_t<T>, variable>;
+
+			switch (state.phase) {
+			case positional:
+				if constexpr (is_variable) {
+					if (value_ptr value = argument.steal_last_assignment()) {
+
+					}
+				} else {
+
+				}
+				break;
+			case keyword:
+				break;
+			}
+		}
+
+		template<size_t Index, class First, class... Rest>
+		inline constexpr void process_arguments(process_arguments_state& state, First const& first, Rest const&... rest) {
+			try {
+				process_argument<Index, First>(state, first);
+			} catch (...) {
+				// In the event of any exception from argument processing, reset the states of the rest of any variables passed
+				if constexpr (sizeof...(Rest) > 0) {
+					reset_passed_variable_states<Rest...>(rest...);
+				}
+				throw;
+			}
+			if constexpr (sizeof...(Rest) > 0) {
+				process_arguments<Index + 1, Rest...>(state, rest...);
+			}
+		}
+
+	public: // Data Aliases
+		std::string const& __name__ = m_name;
+
+	private:
+		std::string m_name;
+		std::vector<parameter> m_parameters;
+		callable_type m_callable;
+
+	}; // class function
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Functions Helpers                                                         *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	// Helper class used in making a complete function object within the def macro
+	class function_builder {
+	public:
+		inline function_builder(const char* name)
+			: m_name(name)
+			, m_parameters()
+		{}
+
+	private:
+		template<class Callable, class = void>
+		struct returns_void : std::false_type {};
+		template<class Callable>
+		struct returns_void<Callable, std::enable_if_t<std::is_void_v<std::invoke_result_t<Callable, function>>>> : std::true_type {};
+
+	public:
+		inline function_builder operator+(std::initializer_list<std::reference_wrapper<variable>> parameters) {
+			m_parameters.clear(); // Just in case
+			m_parameters.reserve(parameters.size());
+			for (auto parameter : parameters) {
+				m_parameters.emplace_back(&parameter.get());
+			}
+			return *this;
+		}
+
+		template<class Callable>
+		inline constexpr function operator+(Callable const& callable) {
+			if constexpr (returns_void<Callable>::value) {
+				return { move(m_name), m_parameters,
+					[&](function& function) -> variable {
+						return variable(callable(function));
+					}
+				};
+			} else {
+				return { move(m_name), m_parameters,
+					[&](function& function) -> variable {
+						callable(function);
+						return {};
+					}
+				};
+			}
+		}
+
+	private:
+		std::string m_name;
+		std::vector<variable*> m_parameters;
+	}; // class function_builder
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
@@ -583,213 +877,6 @@ namespace viper_::literals {
 	}
 
 } // namespace viper_::literals
-
-/*~-------------------------------------------------------------------------~*\
- * Functions                                                                 *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::detail {
-	class function {
-		enum class parameter_type : int8_t {
-			positional = 0,
-			positional_with_default,
-			positional_args,
-			keyword,
-			keyword_with_default,
-			keyword_args
-		};
-
-	public:
-		using callable_type = std::function<variable(function&)>;
-
-		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
-			: m_name(move(name))
-			, m_parameters()
-			, m_callable(move(callable))
-		{
-			enum parameter_phase : int {
-				positional = 0,
-				positional_with_default,
-				keyword_args,
-				finished
-			} phase = positional;
-
-
-			m_parameters.reserve(parameters.size());
-			// Ensures we steal all last assignments and unpack counts from the parameters,
-			// effectively resetting them to before the function was declared in case of an error downstream
-			for (variable* parameter : parameters) {
-				m_parameters.push_back({
-					parameter->get_owner(),
-					parameter->steal_last_assignment(),
-					parameter_type::positional,
-					parameter->steal_unpack_count()
-				});
-			}
-
-			for (size_t i = 0; i < parameters.size(); ++i) {
-				parameter& parameter = m_parameters[i];
-
-				// Returns whether or not it changed the phase
-				const auto unpack_change_phase = [&]() -> bool {
-					if (parameter.unpack_count == 1) {
-						if (phase >= keyword_args) {
-							throw std::runtime_error("*arguments cannot appear more than once");
-						} else if (parameter.default_value) {
-							throw std::runtime_error("**keyword arguments cannot have a default value");
-						}
-						phase = keyword_args;
-						parameter.type = parameter_type::positional_args;
-						return true;
-					} else if (parameter.unpack_count == 2) {
-						if (parameter.default_value) {
-							throw std::runtime_error("*arguments cannot have a default value");
-						}
-						// Args after **kwargs error handled below in finished case of phase switch
-						phase = finished;
-						parameter.type = parameter_type::keyword_args;
-						return true;
-					} else if (parameter.unpack_count >= 3) {
-						throw std::runtime_error("Cannot put more than two '*' on an argument");
-					}
-					return false;
-				};
-
-				switch (phase) {
-				case positional:
-					if (!unpack_change_phase() && parameter.default_value) {
-						phase = positional_with_default;
-						parameter.type = parameter_type::positional_with_default;
-					}
-					break;
-				case positional_with_default:
-					if (!unpack_change_phase()) {
-						if (parameter.default_value) {
-							parameter.type = parameter_type::positional_with_default;
-						} else {
-							throw std::runtime_error("Argument without default value cannot follow arguments with default values");
-						}
-					}
-					break;
-				case keyword_args:
-					if (!unpack_change_phase()) {
-						if (parameter.default_value) {
-							parameter.type = parameter_type::keyword_with_default;
-						} else {
-							parameter.type = parameter_type::keyword;
-						}
-					}
-					break;
-				case finished:
-					throw std::runtime_error("Additional arguments not allowed after **keyword arguments");
-				}
-			}
-		}
-
-		inline ~function() = default;
-
-		template<class... Args>
-		inline variable operator()(Args const&... args) {
-			for (auto const& [variable] : m_parameters) {
-				variable->push();
-			}
-
-			const auto pop_variables = [&]() {
-				for (auto const& [variable] : m_parameters) {
-					variable->pop();
-				}
-			};
-
-			try {
-				preprocess_args<0, Args...>(args...);
-			} catch (std::runtime_error& error) {
-				pop_variables();
-				throw error;
-			}
-
-			pop_variables();
-		}
-
-		std::string const& __name__ = m_name;
-
-	private:
-		template<size_t Index, class First, class... Rest>
-		inline constexpr void preprocess_args(First const& first, Rest const&... rest) {
-			
-			std::decay_t<int> w;
-
-
-
-			if constexpr (sizeof...(Rest) > 0) {
-				preprocess_args<Index + 1, Rest...>(rest...);
-			}
-		}
-
-
-
-
-	private:
-		struct parameter {
-			variable_stack* variable;
-			std::shared_ptr<value> default_value;
-			parameter_type type;
-			uint8_t unpack_count;
-		};
-
-		std::string m_name;
-		std::vector<parameter> m_parameters;
-		callable_type m_callable;
-	}; // class function
-
-
-
-	// Helper class used in making a complete function object within the def macro
-	class function_builder {
-	public:
-		inline function_builder(const char* name)
-			: m_name(name)
-			, m_parameters()
-		{}
-
-	private:
-		template<class Callable, class = void>
-		struct returns_void : std::false_type {};
-		template<class Callable>
-		struct returns_void<Callable, std::enable_if_t<std::is_void_v<std::invoke_result_t<Callable, function>>>> : std::true_type {};
-
-	public:
-		inline function_builder operator+(std::initializer_list<std::reference_wrapper<variable>> parameters) {
-			m_parameters.clear(); // Just in case
-			m_parameters.reserve(parameters.size());
-			for (auto parameter : parameters) {
-				m_parameters.emplace_back(&parameter.get());
-			}
-			return *this;
-		}
-
-		template<class Callable>
-		inline constexpr function operator+(Callable const& callable) {
-			if constexpr (returns_void<Callable>::value) {
-				return { move(m_name), m_parameters,
-					[&](function& function) -> variable {
-						return variable(callable(function));
-					}
-				};
-			} else {
-				return { move(m_name), m_parameters,
-					[&](function& function) -> variable {
-						callable(function);
-						return {};
-					}
-				};
-			}
-		}
-
-	private:
-		std::string m_name;
-		std::vector<variable*> m_parameters;
-	}; // class function_builder
-} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Format Strings                                                            *
