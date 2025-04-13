@@ -515,28 +515,27 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::literals {
-	/// TODO: Protect from macros
-	inline detail::variable& operator""_(const char* string, size_t length) {
+	inline detail::variable& (operator""_)(const char* string, size_t length) {
 		return detail::variable_storage::global_context().literal_access(std::string(string, length));
 	}
 
-	inline detail::variable& operator""_(uint64_t integer) {
+	inline detail::variable& (operator""_)(uint64_t integer) {
 		return detail::variable_storage::global_context().literal_access(std::to_string(integer));
 	}
 
-	inline detail::variable& operator""_(long double real) {
+	inline detail::variable& (operator""_)(long double real) {
 		return detail::variable_storage::global_context().literal_access(std::to_string(real));
 	}
 
-	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
+	inline detail::variable& (operator""_VIPER_UNDERSCORE)(const char* string, size_t length) {
 		return detail::variable_storage::global_context().literal_access(std::string(string, length));
 	}
 
-	inline detail::variable& operator""_VIPER_UNDERSCORE(uint64_t integer) {
+	inline detail::variable& (operator""_VIPER_UNDERSCORE)(uint64_t integer) {
 		return detail::variable_storage::global_context().literal_access(std::to_string(integer));
 	}
 
-	inline detail::variable& operator""_VIPER_UNDERSCORE(long double real) {
+	inline detail::variable& (operator""_VIPER_UNDERSCORE)(long double real) {
 		return detail::variable_storage::global_context().literal_access(std::to_string(real));
 	}
 
