@@ -15,6 +15,7 @@
 #include <any>
 #include <functional>
 #include <list>
+#include <format>
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -394,37 +395,64 @@ namespace viper_::detail {
 namespace viper_::detail {
 
 	class variable_stack {
-	public:
-		variable_stack(std::string const& name) 
+	public: // Lifecycle
+		inline variable_stack(std::string const& name = "__unnamed__")
 			: m_data(1)
 			, m_name(name)
 		{
 			m_data.back().set_owner(this);
 		}
 
-		void pop() {
+		inline void pop() {
 			if (m_data.size() <= 1llu) {
 				m_data.pop_back();
 			}
 		}
 
-		variable& push() {
+		inline variable& push() {
 			variable& new_variable = m_data.emplace_back();
 			new_variable.set_owner(this);
 			return new_variable;
 		}
 
-		variable& top() {
+		inline variable& top() {
 			return m_data.back();
 		}
 
-		variable const& top() const {
+		inline variable const& top() const {
 			return m_data.back();
+		}
+
+		inline std::string const& name() const {
+			return m_name;
+		}
+		
+	public: // Counter
+		using counter_t = uint32_t;
+
+		inline void increment_access_count() {
+			++m_access_counter;
+		}
+		
+		inline counter_t get_access_count() const {
+			return m_access_counter;
+		}
+
+		// Works even when unsigned counter overflows as long as 
+		// their difference isn't more than 2^(size in bits - 1)
+		static inline consteval bool is_newer(counter_t current, counter_t previous) {
+			static_assert(std::is_unsigned_v<counter_t>);
+			// View unsigned difference as signed, turning the high bit into the sign bit
+			// This means: (current < previous) => negative, (current > previous) => positive
+			return static_cast<std::make_signed_t<counter_t>>(current - previous) > 0;
 		}
 
 	private:
 		std::list<variable> m_data;
 		std::string m_name;
+		// Incremented when literal operators (user facing) are used 
+		// to access this variable for disambiguation in certain cases
+		counter_t m_access_counter;
 	}; // class variable_storage
 
 } // namespace viper_::detail
@@ -451,6 +479,12 @@ namespace viper_::detail {
 			return m_data.try_emplace(name, name).first->second;
 		}
 		inline variable& get(std::string const& name) {
+			return get_stack(name).top();
+		}
+
+		// Same as get but also increments the variable stack's access counter
+		// Used by variable access literal operators
+		inline variable& literal_access(std::string const& name) {
 			return get_stack(name).top();
 		}
 
@@ -481,28 +515,29 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::literals {
+	/// TODO: Protect from macros
 	inline detail::variable& operator""_(const char* string, size_t length) {
-		return detail::variable_storage::global_context().get(std::string(string, length));
+		return detail::variable_storage::global_context().literal_access(std::string(string, length));
 	}
 
 	inline detail::variable& operator""_(uint64_t integer) {
-		return detail::variable_storage::global_context().get(std::to_string(integer));
+		return detail::variable_storage::global_context().literal_access(std::to_string(integer));
 	}
 
 	inline detail::variable& operator""_(long double real) {
-		return detail::variable_storage::global_context().get(std::to_string(real));
+		return detail::variable_storage::global_context().literal_access(std::to_string(real));
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(const char* string, size_t length) {
-		return detail::variable_storage::global_context().get(std::string(string, length));
+		return detail::variable_storage::global_context().literal_access(std::string(string, length));
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(uint64_t integer) {
-		return detail::variable_storage::global_context().get(std::to_string(integer));
+		return detail::variable_storage::global_context().literal_access(std::to_string(integer));
 	}
 
 	inline detail::variable& operator""_VIPER_UNDERSCORE(long double real) {
-		return detail::variable_storage::global_context().get(std::to_string(real));
+		return detail::variable_storage::global_context().literal_access(std::to_string(real));
 	}
 
 } // namespace viper_::literals
@@ -517,10 +552,10 @@ namespace viper_::detail {
 		enum class parameter_type : int8_t {
 			positional = 0,
 			positional_with_default,
-			positional_args,
+			positional_catcher,
 			keyword,
 			keyword_with_default,
-			keyword_args
+			keyword_catcher
 		};
 
 		struct parameter {
@@ -544,6 +579,8 @@ namespace viper_::detail {
 			: m_name(move(name))
 			, m_parameters()
 			, m_callable(move(callable))
+			, m_has_positional_catcher(false)
+			, m_has_keyword_catcher(false)
 		{
 			enum parameter_phase : int {
 				positional = 0,
@@ -554,7 +591,7 @@ namespace viper_::detail {
 
 			m_parameters.reserve(parameters.size());
 			// Ensures we steal all last assignments and unpack counts from the parameters,
-			// effectively resetting them to before the function was declared in case of an error downstream
+			// We reset variable buffered states in this loop so that afterwards, exceptions can safely be thrown and they won't break variable states
 			for (variable* parameter : parameters) {
 				m_parameters.push_back({
 					parameter->get_owner(),
@@ -566,6 +603,13 @@ namespace viper_::detail {
 				parameter->reset_buffered_state();
 			}
 
+			for (int i = 0; i < int(m_parameters.size()); ++i) {
+				if (m_parameters[i].variable == nullptr) {
+					throw type_error(std::format("Parameter {} does not declare a parameter name", i));
+				}
+			}
+
+			/// TODO: Provide more speicifics in exception including parameter name and index
 			for (size_t i = 0; i < parameters.size(); ++i) {
 				parameter& parameter = m_parameters[i];
 
@@ -578,7 +622,8 @@ namespace viper_::detail {
 							throw type_error("**keyword arguments cannot have a default value");
 						}
 						phase = keyword_args;
-						parameter.type = parameter_type::positional_args;
+						parameter.type = parameter_type::positional_catcher;
+						m_has_positional_catcher = true;
 						return true;
 					} else if (parameter.unpack_count == 2) {
 						if (parameter.default_value) {
@@ -586,7 +631,8 @@ namespace viper_::detail {
 						}
 						// Args after **kwargs error handled below in finished case of phase switch
 						phase = finished;
-						parameter.type = parameter_type::keyword_args;
+						parameter.type = parameter_type::keyword_catcher;
+						m_has_keyword_catcher = true;
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
@@ -671,8 +717,8 @@ namespace viper_::detail {
 
 		// Used by process_arguments to reset any remaining variable states in the event of an exception
 		template<class First, class... Rest>
-		inline constexpr void reset_passed_variable_states(First const& first, Rest const&... rest) {
-			if constexpr (std::is_same_v<std::decay_t<First>, variable>) {
+		inline constexpr void reset_passed_variable_states(First& first, Rest&... rest) {
+			if constexpr (std::is_same_v<First, variable>) {
 				first.reset_buffered_state();
 			}
 			if constexpr (sizeof...(Rest) > 0) {
@@ -681,16 +727,40 @@ namespace viper_::detail {
 		}
 
 		template<size_t Index, class T>
-		inline constexpr void process_argument(process_arguments_state& state, T const& argument) {
+		inline constexpr void process_argument(process_arguments_state& state, T& argument) {
 			using argument_phase = process_arguments_state::argument_phase;
-			inline consteval bool is_variable = std::is_same_v<std::decay_t<T>, variable>;
+			inline consteval bool is_variable = std::is_same_v<T, variable>;
 
 			if (state.phase == argument_phase::positional) {
 				if constexpr (is_variable) {
-					value_ptr value = argument.steal_last_assignment();
-					if (value) {
+					// This functionally ensures that we are dealing with a non-const variable as T and enables better type checking
+					variable& argument = static_cast<variable&>(argument);
+
+					/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
+					if (value_ptr value = argument.steal_last_assignment()) {
+						//variable_storage const& variables = variable_storage::global_context();
 						state.phase = argument_phase::keyword;
+						bool parameter_matched = false;
+						std::string const& keyword = argument.get_owner()->name();
+						for (parameter& parameter : m_parameters) {
+							if (parameter.variable->name() == keyword) {
+								parameter_matched = true;
+								parameter.variable->top() = argument;
+								parameter.variable->top().accept_last_assignment();
+								break;
+							}
+						}
+						if (!parameter_matched) {
+							if (m_has_keyword_catcher) {
+
+							} else {
+								throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+							}
+						}
+
 					}
+
+
 				} else {
 
 				}
@@ -706,7 +776,7 @@ namespace viper_::detail {
 		}
 
 		template<size_t Index, class First, class... Rest>
-		inline constexpr void process_arguments(process_arguments_state& state, First const& first, Rest const&... rest) {
+		inline constexpr void process_arguments(process_arguments_state& state, First& first, Rest&... rest) {
 			try {
 				process_argument<Index, First>(state, first);
 			} catch (...) {
@@ -728,6 +798,9 @@ namespace viper_::detail {
 		std::string m_name;
 		std::vector<parameter> m_parameters;
 		callable_type m_callable;
+
+		bool m_has_positional_catcher;
+		bool m_has_keyword_catcher;
 
 	}; // class function
 } // namespace viper_::detail
