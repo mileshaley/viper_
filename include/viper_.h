@@ -130,8 +130,6 @@ namespace viper_::detail {
 		variable()
 			: m_data()
 			, m_hint()
-			, m_next_link(nullptr)
-			, m_previous_link(nullptr)
 			, m_owner(nullptr)
 			, m_active(false)
 			, m_unpack_count(0)
@@ -141,8 +139,6 @@ namespace viper_::detail {
 		variable(variable const& other)
 			: m_data(other.m_data)
 			, m_hint(other.m_hint)
-			, m_next_link(nullptr)
-			, m_previous_link(nullptr)
 			, m_owner(nullptr)
 			, m_active(other.m_active)
 			, m_unpack_count(0)
@@ -152,18 +148,10 @@ namespace viper_::detail {
 		variable(variable&& other) noexcept
 			: m_data(std::move(other.m_data))
 			, m_hint(std::exchange(other.m_hint, nullptr))
-			, m_next_link(std::exchange(other.m_next_link, nullptr))
-			, m_previous_link(std::exchange(other.m_next_link, nullptr))
 			, m_owner(nullptr)
 			, m_active(std::exchange(other.m_active, false))
 			, m_unpack_count(0)
 		{
-			if (m_previous_link) {
-				m_previous_link->m_next_link = this;
-			}
-			if (m_next_link) {
-				m_next_link->m_previous_link = this;
-			}
 		}
 
 		~variable() {}
@@ -213,46 +201,6 @@ namespace viper_::detail {
 			}
 			return this;
 		}
-
-	public: // Variable Linking
-
-		// Link two variables together
-		inline variable& operator,(variable& rhs) {
-			m_next_link = &rhs;
-			rhs.m_previous_link = this;
-			return rhs;
-		}
-
-		inline bool is_linked() const {
-			return m_previous_link || m_next_link;
-		}
-
-		inline variable* chain_begin() {
-			if (!m_previous_link) { return this; }
-			return m_previous_link->chain_begin();
-		}
-
-		inline variable* chain_end() {
-			if (!m_next_link) { return this; }
-			return m_next_link->chain_end();
-		}
-
-		inline variable* previous_link() {
-			return m_previous_link;
-		}
-
-		inline variable* next_link() {
-			return m_next_link;
-		}
-			
-	//public: // Parameter Utilities
-	//
-	//	inline bool is_parameter() const {
-	//		return m_parameter;
-	//	}
-	//	inline void set_as_parameter(bool new_state = true) {
-	//		m_parameter = new_state;
-	//	}
 
 	public: // Type Hinting
 
@@ -385,8 +333,6 @@ namespace viper_::detail {
 		data_state m_data;
 
 		std::type_info const* m_hint;
-		variable* m_previous_link;
-		variable* m_next_link;
 		variable_stack* m_owner;
 
 		bool m_active;
