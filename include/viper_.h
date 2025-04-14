@@ -197,7 +197,7 @@ namespace viper_::detail {
 			create();
 			return *this;
 		}
-			
+
 	public: // Access Operator
 
 		// To avoid issues with literal operator followed by .
@@ -304,12 +304,19 @@ namespace viper_::detail {
 			return m_data.get()->type().hash_code();
 		}
 
+		inline variable& direct_assign(value_ptr const& new_value) {
+			m_data.assign(new_value);
+			accept_last_assignment();
+			create();
+			return *this;
+		}
+
 		inline void accept_last_assignment() {
 			m_data.accept_last_assignment();
 		}
 
 
-		inline std::shared_ptr<value> steal_last_assignment() {
+		inline value_ptr steal_last_assignment() {
 			return m_data.steal_last_assignment();
 		}
 
@@ -350,7 +357,7 @@ namespace viper_::detail {
 				, m_last_assignment(nullptr)
 			{}
 
-			inline void assign(std::shared_ptr<value> const& new_value) {
+			inline void assign(value_ptr const& new_value) {
 				m_last_assignment = new_value;
 			}
 
@@ -361,18 +368,18 @@ namespace viper_::detail {
 				}
 			}
 
-			inline std::shared_ptr<value> const& get() const {
+			inline value_ptr const& get() const {
 				accept_last_assignment();
 				return m_value;
 			}
 
-			inline std::shared_ptr<value> steal_last_assignment() {
-				return std::exchange(m_last_assignment, std::shared_ptr<value>());
+			inline value_ptr steal_last_assignment() {
+				return std::exchange(m_last_assignment, value_ptr());
 			}
 
 		private:
-			mutable std::shared_ptr<value> m_value;
-			mutable std::shared_ptr<value> m_last_assignment;
+			mutable value_ptr m_value;
+			mutable value_ptr m_last_assignment;
 		};
 
 		data_state m_data;
@@ -589,8 +596,8 @@ namespace viper_::detail {
 			} phase = positional;
 
 			m_parameters.reserve(parameters.size());
-			// Ensures we steal all last assignments and unpack counts from the parameters,
-			// We reset variable buffered states in this loop so that afterwards, exceptions can safely be thrown and they won't break variable states
+			// We reset variable buffered states in this loop so that afterwards, 
+			// exceptions can safely be thrown and they won't break variable states
 			for (variable* parameter : parameters) {
 				m_parameters.push_back({
 					parameter->get_owner(),
@@ -602,6 +609,8 @@ namespace viper_::detail {
 				parameter->reset_buffered_state();
 			}
 
+			// This isn't included in the above for loop because throwing 
+			// an exception before all input variables are reset causes issues
 			for (int i = 0; i < int(m_parameters.size()); ++i) {
 				if (m_parameters[i].variable == nullptr) {
 					throw type_error(std::format("Parameter {} does not declare a parameter name", i));
@@ -620,18 +629,19 @@ namespace viper_::detail {
 						} else if (parameter.default_value) {
 							throw type_error("**keyword arguments cannot have a default value");
 						}
+						m_has_positional_catcher = true;
 						phase = keyword_args;
 						parameter.type = parameter_type::positional_catcher;
-						m_has_positional_catcher = true;
 						return true;
 					} else if (parameter.unpack_count == 2) {
 						if (parameter.default_value) {
 							throw type_error("*arguments cannot have a default value");
 						}
 						// Args after **kwargs error handled below in finished case of phase switch
+						m_has_keyword_catcher = true;
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
-						m_has_keyword_catcher = true;
+						parameter.default_value = std::make_shared<value>(std::make_any<std::unordered_map<std::string, value>>(), true);
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
@@ -684,6 +694,7 @@ namespace viper_::detail {
 				// Should only be a minor performance impact to doubly assign parameters that 
 				// have default values since we're just copying a shared pointer
 				if (parameter.default_value) {
+					/// make this a deep copy if its a mutable type (maybe?)
 					variable = parameter.default_value;
 					// Bypass assignment buffering since we just created this variable
 					variable.accept_last_assignment();
