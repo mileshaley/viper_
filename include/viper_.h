@@ -43,6 +43,17 @@ namespace viper_ {
 			: runtime_error(message) {
 		}
 	}; // class type_error
+
+	class syntax_error : public std::runtime_error {
+	public:
+		explicit syntax_error(std::string const& message)
+			: runtime_error(message) {
+		}
+
+		explicit syntax_error(const char* message)
+			: runtime_error(message) {
+		}
+	}; // class type_error
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
@@ -114,15 +125,97 @@ namespace viper_ {
 	private:
 
 	};
+
 } // namespace viper_
+
+/*~-------------------------------------------------------------------------~*\
+ * Variable Access Stamps                                                    *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail::stamp {
+	using counter_t = uint32_t;
+
+	// Works even when unsigned counter overflows as long as 
+	// their difference isn't more than 2^(size in bits - 1)
+	static inline constexpr bool is_newer(counter_t current, counter_t previous) {
+		static_assert(std::is_unsigned_v<counter_t>);
+		// View unsigned difference as signed, turning the high bit into the sign bit
+		// This means: (current < previous) => negative, (current > previous) => positive
+		return static_cast<std::make_signed_t<counter_t>>(current - previous) > 0;
+	}
+} // namespace viper_::detail::stamp
+
+/*~-------------------------------------------------------------------------~*\
+ * Variable Stack                                                            *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class variable;
+	// basic_variable_stack is a template as a workaround for a circular dependency between it and variable
+	// It can only be used with variable as Variable and is only ever referred to as variable_stack
+	template<typename Variable>
+	class basic_variable_stack {
+		static_assert(std::is_same_v<Variable, variable>, "basic_variable_stack is only to be used with variable");
+	public: // Lifecycle
+		inline basic_variable_stack(std::string const& name = "__unnamed__")
+			: m_data(1)
+			, m_name(name)
+			, m_access_counter(0) {
+			m_data.back().set_owner(this);
+		}
+
+		inline void pop() {
+			if (m_data.size() <= 1llu) {
+				m_data.pop_back();
+			}
+		}
+
+		inline Variable& push() {
+			Variable& new_variable = m_data.emplace_back();
+			new_variable.set_owner(this);
+			return new_variable;
+		}
+
+		inline Variable& top() {
+			return m_data.back();
+		}
+
+		inline Variable const& top() const {
+			return m_data.back();
+		}
+
+		inline std::string const& name() const {
+			return m_name;
+		}
+
+
+	public: // Counter
+
+		inline void increment_access_count() {
+			++m_access_counter;
+		}
+
+		inline stamp::counter_t get_access_count() const {
+			return m_access_counter;
+		}
+
+	private:
+		std::list<Variable> m_data;
+		std::string m_name;
+		// Incremented when literal operators (user facing) are used 
+		// to access this variable for disambiguation in certain cases
+		stamp::counter_t m_access_counter;
+	}; // class basic_variable_stack
+
+	using variable_stack = basic_variable_stack<variable>;
+
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Variables                                                                 *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
-
-	class variable_stack;
 
 	class variable {
 	public: // Lifecycle
@@ -195,11 +288,25 @@ namespace viper_::detail {
 
 	public: // Unpacking Operator
 
-		inline variable* operator*() {
-			if (++m_unpack_count > 2) {
-				throw std::runtime_error("Variable unpacked more than twice.");
+		inline variable& operator*() {
+			const auto current_access_stamp = get_access_stamp();
+			if (m_unpack_count == 0) {
+				m_unpack_count = 1;
+			} else if (m_unpack_count == 1) {
+				// What we are checking for here is that the order of unpack operations looked like this:
+				//     **"var_" = ...;
+				// And not like this:
+				//     *"var"_ = ...;
+				//     *"var"_ = ...;
+				if (!stamp::is_newer(current_access_stamp, m_previous_unpack_access_stamp)) {
+					m_unpack_count = 2;
+				}
+			} else {
+				m_unpack_count = 0;
+				throw syntax_error("***variable is invalid syntax");
 			}
-			return this;
+			m_previous_unpack_access_stamp = current_access_stamp;
+			return *this;
 		}
 
 	public: // Type Hinting
@@ -239,7 +346,7 @@ namespace viper_::detail {
 			
 	public: // Utility
 
-		inline void reset_buffered_state() {
+		inline void reset_syntax_state() {
 			(void)steal_last_assignment();
 			(void)steal_unpack_count();
 		}
@@ -273,6 +380,10 @@ namespace viper_::detail {
 		}
 			 
 	private: // Helpers
+
+		inline stamp::counter_t get_access_stamp() {
+			return m_owner ? m_owner->get_access_count() : -1;
+		}
 
 		inline void create() {
 			m_active = true;
@@ -337,78 +448,12 @@ namespace viper_::detail {
 
 		bool m_active;
 		uint8_t m_unpack_count;
+		stamp::counter_t m_previous_unpack_access_stamp;
 	}; // class variable
 
 } // namespace viper_::detail
 
-/*~-------------------------------------------------------------------------~*\
- * Variable Stack                                                            *
-\*~-------------------------------------------------------------------------~*/
 
-namespace viper_::detail {
-
-	class variable_stack {
-	public: // Lifecycle
-		inline variable_stack(std::string const& name = "__unnamed__")
-			: m_data(1)
-			, m_name(name)
-		{
-			m_data.back().set_owner(this);
-		}
-
-		inline void pop() {
-			if (m_data.size() <= 1llu) {
-				m_data.pop_back();
-			}
-		}
-
-		inline variable& push() {
-			variable& new_variable = m_data.emplace_back();
-			new_variable.set_owner(this);
-			return new_variable;
-		}
-
-		inline variable& top() {
-			return m_data.back();
-		}
-
-		inline variable const& top() const {
-			return m_data.back();
-		}
-
-		inline std::string const& name() const {
-			return m_name;
-		}
-		
-	public: // Counter
-		using counter_t = uint32_t;
-
-		inline void increment_access_count() {
-			++m_access_counter;
-		}
-		
-		inline counter_t get_access_count() const {
-			return m_access_counter;
-		}
-
-		// Works even when unsigned counter overflows as long as 
-		// their difference isn't more than 2^(size in bits - 1)
-		static inline consteval bool is_newer(counter_t current, counter_t previous) {
-			static_assert(std::is_unsigned_v<counter_t>);
-			// View unsigned difference as signed, turning the high bit into the sign bit
-			// This means: (current < previous) => negative, (current > previous) => positive
-			return static_cast<std::make_signed_t<counter_t>>(current - previous) > 0;
-		}
-
-	private:
-		std::list<variable> m_data;
-		std::string m_name;
-		// Incremented when literal operators (user facing) are used 
-		// to access this variable for disambiguation in certain cases
-		counter_t m_access_counter;
-	}; // class variable_storage
-
-} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Variable Storage                                                          *
@@ -552,7 +597,7 @@ namespace viper_::detail {
 					parameter->steal_unpack_count(),
 				});
 				// Just in case we forget to steal something
-				parameter->reset_buffered_state();
+				parameter->reset_syntax_state();
 			}
 
 			// This isn't included in the above for loop because throwing 
