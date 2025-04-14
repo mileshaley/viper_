@@ -134,11 +134,10 @@ namespace viper_ {
 
 namespace viper_::detail::stamp {
 	using counter_t = uint32_t;
-
+	static_assert(std::is_unsigned_v<counter_t>, "Stamp counters must be unsigned to allow for looping");
 	// Works even when unsigned counter overflows as long as 
 	// their difference isn't more than 2^(size in bits - 1)
 	static inline constexpr bool is_newer(counter_t current, counter_t previous) {
-		static_assert(std::is_unsigned_v<counter_t>);
 		// View unsigned difference as signed, turning the high bit into the sign bit
 		// This means: (current < previous) => negative, (current > previous) => positive
 		return static_cast<std::make_signed_t<counter_t>>(current - previous) > 0;
@@ -151,13 +150,13 @@ namespace viper_::detail::stamp {
 
 namespace viper_::detail {
 	class variable;
-	// basic_variable_stack is a template as a workaround for a circular dependency between it and variable
-	// It can only be used with variable as Variable and is only ever referred to as variable_stack
-	template<typename Variable>
-	class basic_variable_stack {
-		static_assert(std::is_same_v<Variable, variable>, "basic_variable_stack is only to be used with variable");
+	// variable_stack_generic_dummy is a template to workaround the circular dependency between variable_stack and variable
+	// It can only be used with type variable and is only ever referred to as variable_stack
+	template<typename Variable = variable>
+	class variable_stack_generic_dummy {
+		static_assert(std::is_same_v<Variable, variable>, "basic_variable_stack only should be used with variable");
 	public: // Lifecycle
-		inline basic_variable_stack(std::string const& name = "__unnamed__")
+		inline variable_stack_generic_dummy(std::string const& name = "__unnamed__")
 			: m_data(1)
 			, m_name(name)
 			, m_access_counter(0) {
@@ -188,14 +187,13 @@ namespace viper_::detail {
 			return m_name;
 		}
 
-
 	public: // Counter
 
 		inline void increment_access_count() {
 			++m_access_counter;
 		}
 
-		inline stamp::counter_t get_access_count() const {
+		inline stamp::counter_t get_access_stamp() const {
 			return m_access_counter;
 		}
 
@@ -207,7 +205,7 @@ namespace viper_::detail {
 		stamp::counter_t m_access_counter;
 	}; // class basic_variable_stack
 
-	using variable_stack = basic_variable_stack<variable>;
+	using variable_stack = variable_stack_generic_dummy<variable>;
 
 } // namespace viper_::detail
 
@@ -226,6 +224,7 @@ namespace viper_::detail {
 			, m_owner(nullptr)
 			, m_active(false)
 			, m_unpack_count(0)
+			, m_previous_unpack_access_stamp(0)
 		{
 		}
 
@@ -235,6 +234,7 @@ namespace viper_::detail {
 			, m_owner(nullptr)
 			, m_active(other.m_active)
 			, m_unpack_count(0)
+			, m_previous_unpack_access_stamp(0)
 		{
 		}
 
@@ -244,6 +244,7 @@ namespace viper_::detail {
 			, m_owner(nullptr)
 			, m_active(std::exchange(other.m_active, false))
 			, m_unpack_count(0)
+			, m_previous_unpack_access_stamp(0)
 		{
 		}
 
@@ -382,7 +383,7 @@ namespace viper_::detail {
 	private: // Helpers
 
 		inline stamp::counter_t get_access_stamp() {
-			return m_owner ? m_owner->get_access_count() : -1;
+			return m_owner ? m_owner->get_access_stamp() : std::numeric_limits<stamp::counter_t>::max();
 		}
 
 		inline void create() {
@@ -453,8 +454,6 @@ namespace viper_::detail {
 
 } // namespace viper_::detail
 
-
-
 /*~-------------------------------------------------------------------------~*\
  * Variable Storage                                                          *
 \*~-------------------------------------------------------------------------~*/
@@ -483,7 +482,9 @@ namespace viper_::detail {
 		// Same as get but also increments the variable stack's access counter
 		// Used by variable access literal operators
 		inline variable& literal_access(std::string const& name) {
-			return get_stack(name).top();
+			variable_stack& stack = get_stack(name);
+			stack.increment_access_count();
+			return stack.top();
 		}
 
 		inline decltype(auto) find(std::string const& name) {
@@ -536,7 +537,6 @@ namespace viper_::literals {
 	inline detail::variable& (operator""_VIPER_UNDERSCORE)(long double real) {
 		return detail::variable_storage::global_context().literal_access(std::to_string(real));
 	}
-
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
@@ -612,7 +612,7 @@ namespace viper_::detail {
 			for (size_t i = 0; i < parameters.size(); ++i) {
 				parameter& parameter = m_parameters[i];
 
-				// Returns whether or not it changed the phase
+				// Tries to change the phase based on unpacks (*, **), returns true if it succeeds
 				const auto unpack_change_phase = [&]() -> bool {
 					if (parameter.unpack_count == 1) {
 						if (phase >= keyword_args) {
