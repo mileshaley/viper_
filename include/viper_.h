@@ -136,13 +136,11 @@ namespace viper_::detail {
 		{
 		}
 
-		inline value(std::any const& data)
-			: m_data(std::make_shared<value_data>(data, true))
+		template<typename T>
+		inline value(T data)
+			: m_data(std::make_shared<value_data>(std::move(data), true))
 		{
-		}
-
-		inline value(std::any&& data)
-			: m_data(std::make_shared<value_data>(std::move(data), true)) {
+			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 		}
 
 		inline value(value const& other)
@@ -155,51 +153,63 @@ namespace viper_::detail {
 		{
 		}
 
-		inline value& operator=(std::any const& rhs) {
-			m_data = std::make_shared<value_data>(rhs, true);
-			return *this;
-		}
+		//inline value& operator=(std::any const& rhs) {
+		//	m_data = std::make_shared<value_data>(rhs, true);
+		//	return *this;
+		//}
+		//
+		//inline value& operator=(std::any&& rhs) {
+		//	m_data = std::make_shared<value_data>(rhs, true);
+		//	return *this;
+		//}
+		//
+		//inline value& operator=(value const& rhs) {
+		//	m_data = rhs.m_data;
+		//	return *this;
+		//}
+		//
+		//inline value& operator=(value&& rhs) noexcept {
+		//	m_data = std::move(rhs.m_data);
+		//	return *this;
+		//}
 
-		inline value& operator=(std::any&& rhs) {
-			m_data = std::make_shared<value_data>(rhs, true);
-			return *this;
-		}
-
-		inline value& operator=(value const& rhs) {
-			m_data = rhs.m_data;
-			return *this;
-		}
-
-		inline value& operator=(value&& rhs) noexcept {
-			m_data = std::move(rhs.m_data);
-			return *this;
-		}
-
-		inline void clear() {
+		inline void reset() {
 			m_data.reset();
 		}
 
+		template<typename T>
+		inline void assign(std::shared_ptr<value_data> const& new_data) {
+			m_data = new_data;
+		}
+
+		inline void assign(value const& new_value) {
+			m_data = new_value.m_data;
+		}
+
+
 	public: // Value Access
 
-		inline value_data const& get() const {
+		inline value_data& data() {
 			return *m_data;
 		}
 
-		inline value_data& get() {
+		inline value_data const& data() const {
 			return *m_data;
 		}
 
-		inline value_data const& operator*() const {
-			return *m_data;
-		}
 
-		inline value_data& operator*() {
-			return *m_data;
-		}
 
-		inline value_data* operator->() const {
-			return m_data.get();
-		}
+		//inline value_data const& operator*() const {
+		//	return *m_data;
+		//}
+		//
+		//inline value_data& operator*() {
+		//	return *m_data;
+		//}
+		//
+		//inline value_data* operator->() const {
+		//	return m_data.get();
+		//}
 
 	public: // Comparison
 		inline bool is_same(value const& rhs) const {
@@ -454,11 +464,11 @@ namespace viper_::detail {
 		}
 
 		inline std::any const& data() const {
-			return m_data.get()->data();
+			return m_data.get().data().data();
 		}
 
 		inline size_t type_hash_code() const {
-			return m_data.get()->type().hash_code();
+			return m_data.get().data().type().hash_code();
 		}
 
 		inline variable& direct_assign(value const& new_value) {
@@ -494,7 +504,7 @@ namespace viper_::detail {
 		inline void destroy() {
 			m_active = false;
 			m_hint = nullptr;
-			m_data = data_state();
+			m_data.reset();
 		}
 
 		//inline void check_assignment_type(std::type_info const& new_type) {
@@ -519,13 +529,13 @@ namespace viper_::detail {
 			{}
 
 			inline void assign(value const& new_value) {
-				m_last_assignment = new_value;
+				m_last_assignment.assign(new_value);
 			}
 
 			inline void accept_last_assignment() const {
 				if (!m_last_assignment.is_none()) {
-					m_value = m_last_assignment;
-					m_last_assignment.clear();
+					m_value.assign(m_last_assignment);
+					m_last_assignment.reset();
 				}
 			}
 
@@ -535,7 +545,13 @@ namespace viper_::detail {
 			}
 
 			inline value steal_last_assignment() {
-				return std::exchange(m_last_assignment, value());
+				value last_assignment(std::move(m_last_assignment));
+				return last_assignment;
+			}
+
+			inline void reset() {
+				m_value.reset();
+				m_last_assignment.reset();
 			}
 
 		private:
@@ -733,7 +749,7 @@ namespace viper_::detail {
 						m_has_keyword_catcher = true;
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
-						parameter.default_value = std::make_shared<value_data>(std::make_any<std::unordered_map<std::string, value_data>>(), true);
+						parameter.default_value.assign(std::make_shared<value_data>(std::make_any<std::unordered_map<std::string, value_data>>(), true));
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
