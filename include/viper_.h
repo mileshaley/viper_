@@ -251,13 +251,13 @@ namespace viper_::detail::stamp {
 
 namespace viper_::detail {
 	class variable;
-	// variable_stack_generic_dummy is a template to workaround the circular dependency between variable_stack and variable
-	// It can only be used with type variable and is only ever referred to as variable_stack
+	// generic_variable_stack is a template to workaround the circular dependency between variable_stack and variable
+	// It can only be used with type variable and should only ever be referred to as variable_stack
 	template<typename Variable = variable>
-	class variable_stack_generic_dummy {
-		static_assert(std::is_same_v<Variable, variable>, "basic_variable_stack only should be used with variable");
+	class generic_variable_stack {
+		static_assert(std::is_same_v<Variable, variable>, "generic_variable_stack only should be used with variable");
 	public: // Lifecycle
-		inline variable_stack_generic_dummy(std::string const& name = "__unnamed__")
+		inline generic_variable_stack(std::string const& name = "__unnamed__")
 			: m_data(1)
 			, m_name(name)
 			, m_access_counter(0) {
@@ -306,7 +306,7 @@ namespace viper_::detail {
 		stamp::counter_t m_access_counter;
 	}; // class basic_variable_stack
 
-	using variable_stack = variable_stack_generic_dummy<variable>;
+	using variable_stack = generic_variable_stack<variable>;
 
 } // namespace viper_::detail
 
