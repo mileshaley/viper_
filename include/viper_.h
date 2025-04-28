@@ -132,99 +132,99 @@ namespace viper_::detail {
 	public: // Lifecycle
 
 		inline value()
-			: m_value(nullptr)
+			: m_data(nullptr)
 		{
 		}
 
 		inline value(std::any const& data)
-			: m_value(std::make_shared<value_data>(data, true))
+			: m_data(std::make_shared<value_data>(data, true))
 		{
 		}
 
 		inline value(std::any&& data)
-			: m_value(std::make_shared<value_data>(std::move(data), true)) {
+			: m_data(std::make_shared<value_data>(std::move(data), true)) {
 		}
 
 		inline value(value const& other)
-			: m_value(other.m_value)
+			: m_data(other.m_data)
 		{
 		}
 
 		inline value(value&& other) noexcept
-			: m_value(std::move(other.m_value))
+			: m_data(std::move(other.m_data))
 		{
 		}
 
 		inline value& operator=(std::any const& rhs) {
-			m_value = std::make_shared<value_data>(rhs, true);
+			m_data = std::make_shared<value_data>(rhs, true);
 			return *this;
 		}
 
 		inline value& operator=(std::any&& rhs) {
-			m_value = std::make_shared<value_data>(rhs, true);
+			m_data = std::make_shared<value_data>(rhs, true);
 			return *this;
 		}
 
 		inline value& operator=(value const& rhs) {
-			m_value = rhs.m_value;
+			m_data = rhs.m_data;
 			return *this;
 		}
 
 		inline value& operator=(value&& rhs) noexcept {
-			m_value = std::move(rhs.m_value);
+			m_data = std::move(rhs.m_data);
 			return *this;
 		}
 
 		inline void clear() {
-			m_value.reset();
+			m_data.reset();
 		}
 
 	public: // Value Access
 
 		inline value_data const& get() const {
-			return *m_value;
+			return *m_data;
 		}
 
 		inline value_data& get() {
-			return *m_value;
+			return *m_data;
 		}
 
 		inline value_data const& operator*() const {
-			return *m_value;
+			return *m_data;
 		}
 
 		inline value_data& operator*() {
-			return *m_value;
+			return *m_data;
 		}
 
 		inline value_data* operator->() const {
-			return m_value.get();
+			return m_data.get();
 		}
 
 	public: // Comparison
 		inline bool is_same(value const& rhs) const {
-			return m_value == rhs.m_value;
+			return m_data == rhs.m_data;
 		}
 
 		inline bool is_none() const {
-			return m_value == nullptr;
+			return m_data == nullptr;
 		}
 
 		inline bool operator==(value const& rhs) const {
-			if (!m_value || !rhs.m_value) { 
-				if (!m_value && !rhs.m_value) {
+			if (!m_data || !rhs.m_data) { 
+				if (!m_data && !rhs.m_data) {
 					return true;
 				}
 				return false; 
 			}
-			if (m_value->data().type() != rhs.m_value->data().type()) {
+			if (m_data->data().type() != rhs.m_data->data().type()) {
 				return false;
 			}
 
 		}
 
 	private: // Data Member
-		std::shared_ptr<value_data> m_value;
+		std::shared_ptr<value_data> m_data;
 	}; // class value
 
 } // namespace viper_::detail
@@ -986,7 +986,7 @@ namespace viper_::detail {
 				return {};
 			}
 		}
-	}; // class string_representation<T>\
+	}; // class string_representation<T>
 
 	template<>
 	class string_representation<const char*> {
@@ -1294,6 +1294,7 @@ static inline viper_::detail::underscore_proxy _VIPER_UNDERSCORE;
 namespace viper_ {
 	static inline constexpr bool True = true;
 	static inline constexpr bool False = false;
+	static inline const detail::value None{};
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
