@@ -77,14 +77,20 @@ namespace viper_ {
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
- * Values                                                                    *
+ * Value Data & Metadata                                                     *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
 
-	class value {
+	class value_data {
 	public:
-		value(std::any&& data, bool is_data_mutable)
+		value_data(std::any const& data, bool is_data_mutable)
+			: m_data(data)
+			, m_mutable(is_data_mutable) 
+		{
+		}
+
+		value_data(std::any&& data, bool is_data_mutable)
 			: m_data(std::move(data))
 			, m_mutable(is_data_mutable)
 		{
@@ -105,28 +111,116 @@ namespace viper_::detail {
 	private:
 		std::any m_data;
 		bool m_mutable;
-	}; // class value
-
-	using value_ptr = std::shared_ptr<value>;
+	}; // class value_data
 
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
- * Utility                                                                   *
+ * Value Class                                                               *
 \*~-------------------------------------------------------------------------~*/
 
-namespace viper_ {
-	template<typename T>
-	class buffered_data {
-		using type = T;
-	public:
+namespace viper_::detail {
 
+	class value {
+	public: // Lifecycle
 
-	private:
+		inline value()
+			: m_value(nullptr)
+		{
+		}
 
-	};
+		inline value(std::any const& data)
+			: m_value(std::make_shared<value_data>(data, true))
+		{
+		}
 
-} // namespace viper_
+		inline value(std::any&& data)
+			: m_value(std::make_shared<value_data>(std::move(data), true)) {
+		}
+
+		inline value(value const& other)
+			: m_value(other.m_value)
+		{
+		}
+
+		inline value(value&& other) noexcept
+			: m_value(std::move(other.m_value))
+		{
+		}
+
+		inline value& operator=(std::any const& rhs) {
+			m_value = std::make_shared<value_data>(rhs, true);
+			return *this;
+		}
+
+		inline value& operator=(std::any&& rhs) {
+			m_value = std::make_shared<value_data>(rhs, true);
+			return *this;
+		}
+
+		inline value& operator=(value const& rhs) {
+			m_value = rhs.m_value;
+			return *this;
+		}
+
+		inline value& operator=(value&& rhs) noexcept {
+			m_value = std::move(rhs.m_value);
+			return *this;
+		}
+
+		inline void clear() {
+			m_value.reset();
+		}
+
+	public: // Value Access
+
+		inline value_data const& get() const {
+			return *m_value;
+		}
+
+		inline value_data& get() {
+			return *m_value;
+		}
+
+		inline value_data const& operator*() const {
+			return *m_value;
+		}
+
+		inline value_data& operator*() {
+			return *m_value;
+		}
+
+		inline value_data* operator->() const {
+			return m_value.get();
+		}
+
+	public: // Comparison
+		inline bool is_same(value const& rhs) const {
+			return m_value == rhs.m_value;
+		}
+
+		inline bool is_none() const {
+			return m_value == nullptr;
+		}
+
+		inline bool operator==(value const& rhs) const {
+			if (!m_value || !rhs.m_value) { 
+				if (!m_value && !rhs.m_value) {
+					return true;
+				}
+				return false; 
+			}
+			if (m_value->data().type() != rhs.m_value->data().type()) {
+				return false;
+			}
+
+		}
+
+	private: // Data Member
+		std::shared_ptr<value_data> m_value;
+	}; // class value
+
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * Variable Access Stamps                                                    *
@@ -275,7 +369,7 @@ namespace viper_::detail {
 			// Explicitly instantiate reflection for T 
 			(void)sizeof(instantiate_type<T>);
 			//check_assignment_type(typeid(std::decay_t<T>));
-			m_data.assign(std::make_shared<value>(rhs, true));
+			m_data.assign(value(rhs));
 			create();
 			return *this;
 		}
@@ -360,7 +454,7 @@ namespace viper_::detail {
 			return m_data.get()->type().hash_code();
 		}
 
-		inline variable& direct_assign(value_ptr const& new_value) {
+		inline variable& direct_assign(value const& new_value) {
 			m_data.assign(new_value);
 			accept_last_assignment();
 			create();
@@ -372,7 +466,7 @@ namespace viper_::detail {
 		}
 
 
-		inline value_ptr steal_last_assignment() {
+		inline value steal_last_assignment() {
 			return m_data.steal_last_assignment();
 		}
 
@@ -417,29 +511,29 @@ namespace viper_::detail {
 				, m_last_assignment(nullptr)
 			{}
 
-			inline void assign(value_ptr const& new_value) {
+			inline void assign(value const& new_value) {
 				m_last_assignment = new_value;
 			}
 
 			inline void accept_last_assignment() const {
-				if (m_last_assignment != nullptr) {
+				if (!m_last_assignment.is_none()) {
 					m_value = m_last_assignment;
-					m_last_assignment.reset();
+					m_last_assignment.clear();
 				}
 			}
 
-			inline value_ptr const& get() const {
+			inline value const& get() const {
 				accept_last_assignment();
 				return m_value;
 			}
 
-			inline value_ptr steal_last_assignment() {
-				return std::exchange(m_last_assignment, value_ptr());
+			inline value steal_last_assignment() {
+				return std::exchange(m_last_assignment, value());
 			}
 
 		private:
-			mutable value_ptr m_value;
-			mutable value_ptr m_last_assignment;
+			mutable value m_value;
+			mutable value m_last_assignment;
 		};
 
 		data_state m_data;
@@ -557,7 +651,7 @@ namespace viper_::detail {
 
 		struct parameter {
 			variable_stack* variable;
-			value_ptr default_value;
+			value default_value;
 			parameter_type type;
 			uint8_t unpack_count;
 		};
@@ -617,7 +711,7 @@ namespace viper_::detail {
 					if (parameter.unpack_count == 1) {
 						if (phase >= keyword_args) {
 							throw type_error("*arguments cannot appear more than once");
-						} else if (parameter.default_value) {
+						} else if (!parameter.default_value.is_none()) {
 							throw type_error("**keyword arguments cannot have a default value");
 						}
 						m_has_positional_catcher = true;
@@ -625,14 +719,14 @@ namespace viper_::detail {
 						parameter.type = parameter_type::positional_catcher;
 						return true;
 					} else if (parameter.unpack_count == 2) {
-						if (parameter.default_value) {
+						if (!parameter.default_value.is_none()) {
 							throw type_error("*arguments cannot have a default value");
 						}
 						// Args after **kwargs error handled below in finished case of phase switch
 						m_has_keyword_catcher = true;
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
-						parameter.default_value = std::make_shared<value>(std::make_any<std::unordered_map<std::string, value>>(), true);
+						parameter.default_value = std::make_shared<value_data>(std::make_any<std::unordered_map<std::string, value_data>>(), true);
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
@@ -642,14 +736,14 @@ namespace viper_::detail {
 
 				switch (phase) {
 				case positional:
-					if (!unpack_change_phase() && parameter.default_value) {
+					if (!unpack_change_phase() && !parameter.default_value.is_none()) {
 						phase = positional_with_default;
 						parameter.type = parameter_type::positional_with_default;
 					}
 					break;
 				case positional_with_default:
 					if (!unpack_change_phase()) {
-						if (parameter.default_value) {
+						if (!parameter.default_value.is_none()) {
 							parameter.type = parameter_type::positional_with_default;
 						} else {
 							throw type_error("Argument without default value cannot follow arguments with default values");
@@ -658,7 +752,7 @@ namespace viper_::detail {
 					break;
 				case keyword_args:
 					if (!unpack_change_phase()) {
-						if (parameter.default_value) {
+						if (!parameter.default_value.is_none()) {
 							parameter.type = parameter_type::keyword_with_default;
 						} else {
 							parameter.type = parameter_type::keyword;
@@ -738,7 +832,7 @@ namespace viper_::detail {
 					variable& argument = static_cast<variable&>(argument);
 
 					/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
-					if (value_ptr value = argument.steal_last_assignment()) {
+					if (value value = argument.steal_last_assignment()) {
 						//variable_storage const& variables = variable_storage::global_context();
 						state.phase = argument_phase::keyword;
 						bool parameter_matched = false;
@@ -767,7 +861,7 @@ namespace viper_::detail {
 				}
 			} else /* if (state.phase == argument_phase::keyword) */ {
 				if constexpr (is_variable) {
-					if (value_ptr value = argument.steal_last_assignment()) {
+					if (value value = argument.steal_last_assignment()) {
 						state.phase = argument_phase::keyword;
 					}
 				} else {
@@ -908,6 +1002,11 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
+	template<typename T, class = void>
+	struct has_equals : std::false_type {};
+	template<typename T>
+	struct has_equals<T, std::void_t<decltype(std::declval<T>() == std::declval<T>())>> : std::true_type {};
+
 	class type_record {
 	public:
 		type_record() = default;
@@ -924,6 +1023,20 @@ namespace viper_::detail {
 
 		virtual std::string get_string_data(std::any const& data) const override {
 			return string_representation<T>::get(std::any_cast<T const&>(data));
+		}
+
+		virtual bool equal(std::any const& a, std::any const& b) {
+			if (a.type() != b.type() || !a.has_value() || !b.has_value()) {
+				return false;
+			}
+
+
+
+			if constexpr (has_equals<T>::value) {
+				return std::any_cast<T>(a) == std::any_cast<T>(b);
+			} else {
+				return false;
+			}
 		}
 	}; // class type_record
 
