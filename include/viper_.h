@@ -18,6 +18,13 @@
 #include <format>
 
 /*~-------------------------------------------------------------------------~*\
+ * Internal Macros                                                           *
+\*~-------------------------------------------------------------------------~*/
+
+#define VIPER_INTERNAL_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
+#define VIPER_INTERNAL_INSTANTIATE_TYPE(Type) (void)sizeof(instantiate_type<Type>)
+
+/*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
 \*~-------------------------------------------------------------------------~*/
 
@@ -367,7 +374,7 @@ namespace viper_::detail {
 		template<typename T>
 		inline variable& operator=(T rhs) {
 			// Explicitly instantiate reflection for T 
-			(void)sizeof(instantiate_type<T>);
+			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 			//check_assignment_type(typeid(std::decay_t<T>));
 			m_data.assign(value(rhs));
 			create();
@@ -664,7 +671,7 @@ namespace viper_::detail {
 		};
 
 	public: // Lifecycle
-		using callable_type = std::function<variable(function&)>;
+		using callable_type = std::function<value(function&)>;
 
 		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
 			: m_name(move(name))
@@ -770,7 +777,7 @@ namespace viper_::detail {
 	public: // Calling
 
 		template<class... Args>
-		inline variable operator()(Args const&... args) {
+		inline value operator()(Args const&... args) {
 			// We assume at first that all arguments passed are valid, meaning all parameter variables will need to be pushed
 			// Only wastes time if there is an exception in processing the arguments
 			for (parameter const& parameter : m_parameters) {
@@ -805,7 +812,9 @@ namespace viper_::detail {
 				throw;
 			}
 
+			value return_value = m_callable(*this);
 			reset_variables();
+			return return_value;
 		}
 
 	private:
@@ -933,13 +942,13 @@ namespace viper_::detail {
 		inline constexpr function operator+(Callable const& callable) {
 			if constexpr (returns_void<Callable>::value) {
 				return { move(m_name), m_parameters,
-					[&](function& function) -> variable {
-						return variable(callable(function));
+					[&](function& function) -> value {
+						return value(callable(function));
 					}
 				};
 			} else {
 				return { move(m_name), m_parameters,
-					[&](function& function) -> variable {
+					[&](function& function) -> value {
 						callable(function);
 						return {};
 					}
@@ -1298,8 +1307,6 @@ namespace viper_ {
 #define VIPER_EXCEPT catch
 #define VIPER_FORMAT (::viper_::format_string)
 #define VIPER_COLON
-
-#define VIPER_INTERNAL_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
 
 #define VIPER_INTERNAL_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
 
