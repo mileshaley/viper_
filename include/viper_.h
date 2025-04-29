@@ -63,6 +63,155 @@ namespace viper_ {
 	}; // class type_error
 } // namespace viper_
 
+
+/*~-------------------------------------------------------------------------~*\
+ * String Representation of Data                                             *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	template<typename T, class = void>
+	class has_to_string
+		: public std::false_type {
+	};
+
+	template<typename T>
+	class has_to_string<T, std::void_t<decltype(std::to_string(std::declval<T>()))>>
+		: public std::true_type {
+	};
+
+	template<typename T>
+	class string_representation {
+	public:
+		static inline std::string get(T const& data) {
+			if constexpr (has_to_string<T>::value) {
+				return std::to_string(data);
+			} else {
+				return {};
+			}
+		}
+	}; // class string_representation<T>
+
+	template<>
+	class string_representation<const char*> {
+	public:
+		static inline std::string get(const char* const& data) {
+			return std::string(data);
+		}
+	}; // class string_representation<cosnt char*>
+
+	template<>
+	class string_representation<std::string> {
+	public:
+		static inline std::string get(std::string const& data) {
+			return data;
+		}
+	}; // class string_representation<std::string>
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Records                                                              *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	template<typename T, class = void>
+	struct has_equals : std::false_type {};
+	template<typename T>
+	struct has_equals<T, std::void_t<decltype(std::declval<T>() == std::declval<T>())>> : std::true_type {};
+
+	class type_record {
+	public:
+		type_record() = default;
+		virtual ~type_record() = default;
+		virtual std::string get_string_data(std::any const& data) const = 0;
+		virtual bool equal(std::any const& a, std::any const& b) const = 0;
+	}; // class type_record
+
+	template<typename T>
+	class typed_type_record : public type_record {
+	public:
+		using type = T;
+		typed_type_record() = default;
+		virtual ~typed_type_record() override = default;
+
+		virtual std::string get_string_data(std::any const& data) const override {
+			return string_representation<T>::get(std::any_cast<T const&>(data));
+		}
+
+		virtual bool equal(std::any const& a, std::any const& b) const override {
+			if constexpr (has_equals<T>::value) {
+				if (a.type() != b.type() || !a.has_value() || !b.has_value()) {
+					return false;
+				}
+				return std::any_cast<T>(a) == std::any_cast<T>(b);
+			} else {
+				return false;
+			}
+		}
+
+	}; // class type_record
+
+} //namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Record Storage                                                       *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class type_record_storage {
+	public:
+		using map_type = std::unordered_map<size_t, std::unique_ptr<type_record>>;
+		static inline type_record_storage& global_context() {
+			static type_record_storage storage{};
+			return storage;
+		}
+
+		type_record_storage() = default;
+
+		type_record const* find(size_t key) const {
+			const auto it = m_data.find(key);
+			if (it == m_data.end()) { return nullptr; }
+			return it->second.get();
+		}
+
+		template<typename T>
+		inline void register_type(size_t key) {
+			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
+		}
+
+	private:
+		map_type m_data;
+	}; // class type_record_storage
+
+} //namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Type Instantiation                                                        *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	template<typename T>
+	class type_instatiatior {
+	public:
+		using type = T;
+
+		inline type_instatiatior() {
+			type_record_storage::global_context().register_type<T>(
+				typeid(std::decay_t<T>).hash_code());
+		}
+	}; // class type_instatiatior
+
+	template<typename T>
+	class instantiate_type {
+	public:
+		static inline const type_instatiatior<T> global_instantiator{};
+	}; // class type_instatiatior
+
+} // namespace viper_::detail
+
 /*~-------------------------------------------------------------------------~*\
  * Type Hints                                                                *
 \*~-------------------------------------------------------------------------~*/
@@ -153,26 +302,6 @@ namespace viper_::detail {
 		{
 		}
 
-		//inline value& operator=(std::any const& rhs) {
-		//	m_data = std::make_shared<value_data>(rhs, true);
-		//	return *this;
-		//}
-		//
-		//inline value& operator=(std::any&& rhs) {
-		//	m_data = std::make_shared<value_data>(rhs, true);
-		//	return *this;
-		//}
-		//
-		//inline value& operator=(value const& rhs) {
-		//	m_data = rhs.m_data;
-		//	return *this;
-		//}
-		//
-		//inline value& operator=(value&& rhs) noexcept {
-		//	m_data = std::move(rhs.m_data);
-		//	return *this;
-		//}
-
 		inline void reset() {
 			m_data.reset();
 		}
@@ -197,20 +326,6 @@ namespace viper_::detail {
 			return *m_data;
 		}
 
-
-
-		//inline value_data const& operator*() const {
-		//	return *m_data;
-		//}
-		//
-		//inline value_data& operator*() {
-		//	return *m_data;
-		//}
-		//
-		//inline value_data* operator->() const {
-		//	return m_data.get();
-		//}
-
 	public: // Comparison
 		inline bool is_same(value const& rhs) const {
 			return m_data == rhs.m_data;
@@ -220,17 +335,33 @@ namespace viper_::detail {
 			return m_data == nullptr;
 		}
 
+		template<typename T>
+		inline bool operator==(T const& rhs) const {
+			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
+			if constexpr (has_equals<T>::value) {
+				if (!m_data or m_data->data().has_value or m_data->type() != typeid(std::decay_t<T>)) {
+					return false;
+				}
+				return std::any_cast<T>(m_data->data()) == rhs;
+			} else {
+				return false;
+			}
+		}
+
 		inline bool operator==(value const& rhs) const {
-			if (!m_data || !rhs.m_data) { 
-				if (!m_data && !rhs.m_data) {
+			if (!m_data or !rhs.m_data) { 
+				if (!m_data and !rhs.m_data) {
 					return true;
 				}
 				return false; 
 			}
-			if (m_data->data().type() != rhs.m_data->data().type()) {
-				return false;
-			}
 
+			auto const& type_records = type_record_storage::global_context();
+			
+			type_record const* my_type = type_records.find(m_data->type().hash_code());
+			/// TODO: Maybe this should be an error
+			if (my_type == nullptr) { return false; }
+			return my_type->equal(m_data->data(), rhs.m_data->data());
 		}
 
 	private: // Data Member
@@ -979,151 +1110,6 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
- * String Representation of Data                                             *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::detail {
-
-	template<typename T, class = void>
-	class has_to_string 
-		: public std::false_type {};
-
-	template<typename T>
-	class has_to_string<T, std::void_t<decltype(std::to_string(std::declval<T>()))>> 
-		: public std::true_type {};
-
-	template<typename T>
-	class string_representation {
-	public:
-		static inline std::string get(T const& data) {
-			if constexpr (has_to_string<T>::value) {
-				return std::to_string(data);
-			} else {
-				return {};
-			}
-		}
-	}; // class string_representation<T>
-
-	template<>
-	class string_representation<const char*> {
-	public:
-		static inline std::string get(const char* const& data) {
-			return std::string(data);
-		}
-	}; // class string_representation<cosnt char*>
-
-	template<>
-	class string_representation<std::string> {
-	public:
-		static inline std::string get(std::string const& data) {
-			return data;
-		}
-	}; // class string_representation<std::string>
-
-} // namespace viper_::detail
-
-/*~-------------------------------------------------------------------------~*\
- * Type Records                                                              *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::detail {
-	template<typename T, class = void>
-	struct has_equals : std::false_type {};
-	template<typename T>
-	struct has_equals<T, std::void_t<decltype(std::declval<T>() == std::declval<T>())>> : std::true_type {};
-
-	class type_record {
-	public:
-		type_record() = default;
-		virtual ~type_record() = default;
-		virtual std::string get_string_data(std::any const& data) const = 0;
-	}; // class type_record
-
-	template<typename T>
-	class typed_type_record : public type_record {
-	public:
-		using type = T;
-		typed_type_record() = default;
-		virtual ~typed_type_record() override = default;
-
-		virtual std::string get_string_data(std::any const& data) const override {
-			return string_representation<T>::get(std::any_cast<T const&>(data));
-		}
-
-		virtual bool equal(std::any const& a, std::any const& b) {
-			if (a.type() != b.type() || !a.has_value() || !b.has_value()) {
-				return false;
-			}
-
-
-
-			if constexpr (has_equals<T>::value) {
-				return std::any_cast<T>(a) == std::any_cast<T>(b);
-			} else {
-				return false;
-			}
-		}
-	}; // class type_record
-
-} //namespace viper_::detail
-
-/*~-------------------------------------------------------------------------~*\
- * Type Record Storage                                                       *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::detail {
-
-	class type_record_storage {
-	public:
-		using map_type = std::unordered_map<size_t, std::unique_ptr<type_record>>;
-		static inline type_record_storage& global_context() {
-			static type_record_storage storage{};
-			return storage;
-		}
-
-		type_record_storage() = default;
-
-		inline map_type& map() {
-			return m_data;
-		}
-
-		template<typename T>
-		inline void register_type(size_t key) {
-			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
-		}
-
-	private:
-		map_type m_data;
-	}; // class type_record_storage
-
-} //namespace viper_::detail
-
-/*~-------------------------------------------------------------------------~*\
- * Type Instantiation                                                        *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_::detail {
-
-	template<typename T>
-	class type_instatiatior {
-	public:
-		using type = T;
-
-		inline type_instatiatior() {
-			type_record_storage::global_context().register_type<T>(
-				typeid(std::decay_t<T>).hash_code());
-		}
-	}; // class type_instatiatior
-
-	template<typename T>
-	class instantiate_type {
-	public:
-		static inline const type_instatiatior<T> global_instantiator{};
-	}; // class type_instatiatior
-
-} // namespace viper_::detail
-
-/*~-------------------------------------------------------------------------~*\
  * Format Strings                                                            *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1140,15 +1126,15 @@ namespace viper_::detail {
 				const int variable_length = i - begin_format - 1;
 
 				detail::variable_storage const& variables = detail::variable_storage::global_context();
-				detail::type_record_storage::map_type const& type_map = detail::type_record_storage::global_context().map();
+				detail::type_record_storage const& types = detail::type_record_storage::global_context();
 
 				std::string data_string = "";
 
 				auto var_it = variables.find(out.substr(begin_format + 1llu, variable_length));
 				if (var_it != variables.end()) {
-					auto type_it = type_map.find(var_it->second.top().type_hash_code());
-					if (type_it != type_map.end()) {
-						data_string = type_it->second->get_string_data(var_it->second.top().data());
+					type_record const* type = types.find(var_it->second.top().type_hash_code());
+					if (type) {
+						data_string = type->get_string_data(var_it->second.top().data());
 					}
 				}
 
