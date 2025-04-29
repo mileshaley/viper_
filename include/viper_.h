@@ -141,7 +141,7 @@ namespace viper_::detail {
 
 		virtual bool equal(std::any const& a, std::any const& b) const override {
 			if constexpr (has_equals<T>::value) {
-				if (a.type() != b.type() || !a.has_value() || !b.has_value()) {
+				if (a.type() != b.type() or not a.has_value() or not b.has_value()) {
 					return false;
 				}
 				return std::any_cast<T>(a) == std::any_cast<T>(b);
@@ -335,11 +335,15 @@ namespace viper_::detail {
 			return m_data == nullptr;
 		}
 
+		inline bool is_some() const {
+			return m_data != nullptr;
+		}
+
 		template<typename T>
 		inline bool operator==(T const& rhs) const {
 			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 			if constexpr (has_equals<T>::value) {
-				if (!m_data or m_data->data().has_value or m_data->type() != typeid(std::decay_t<T>)) {
+				if (not m_data or not m_data->data().has_value() or m_data->type() != typeid(std::decay_t<T>)) {
 					return false;
 				}
 				return std::any_cast<T>(m_data->data()) == rhs;
@@ -349,8 +353,8 @@ namespace viper_::detail {
 		}
 
 		inline bool operator==(value const& rhs) const {
-			if (!m_data or !rhs.m_data) { 
-				if (!m_data and !rhs.m_data) {
+			if (not m_data or not rhs.m_data) { 
+				if (not m_data and not rhs.m_data) {
 					return true;
 				}
 				return false; 
@@ -541,7 +545,7 @@ namespace viper_::detail {
 				// And not like this:
 				//     *"var"_ = ...;
 				//     *"var"_ = ...;
-				if (!stamp::is_newer(current_access_stamp, m_previous_unpack_access_stamp)) {
+				if (not stamp::is_newer(current_access_stamp, m_previous_unpack_access_stamp)) {
 					m_unpack_count = 2;
 				}
 			} else {
@@ -664,7 +668,7 @@ namespace viper_::detail {
 			}
 
 			inline void accept_last_assignment() const {
-				if (!m_last_assignment.is_none()) {
+				if (m_last_assignment.is_some()) {
 					m_value.assign(m_last_assignment);
 					m_last_assignment.reset();
 				}
@@ -865,7 +869,7 @@ namespace viper_::detail {
 					if (parameter.unpack_count == 1) {
 						if (phase >= keyword_args) {
 							throw type_error("*arguments cannot appear more than once");
-						} else if (!parameter.default_value.is_none()) {
+						} else if (parameter.default_value.is_some()) {
 							throw type_error("**keyword arguments cannot have a default value");
 						}
 						m_has_positional_catcher = true;
@@ -873,7 +877,7 @@ namespace viper_::detail {
 						parameter.type = parameter_type::positional_catcher;
 						return true;
 					} else if (parameter.unpack_count == 2) {
-						if (!parameter.default_value.is_none()) {
+						if (parameter.default_value.is_some()) {
 							throw type_error("*arguments cannot have a default value");
 						}
 						// Args after **kwargs error handled below in finished case of phase switch
@@ -890,14 +894,14 @@ namespace viper_::detail {
 
 				switch (phase) {
 				case positional:
-					if (!unpack_change_phase() && !parameter.default_value.is_none()) {
+					if (not unpack_change_phase() and parameter.default_value.is_some()) {
 						phase = positional_with_default;
 						parameter.type = parameter_type::positional_with_default;
 					}
 					break;
 				case positional_with_default:
-					if (!unpack_change_phase()) {
-						if (!parameter.default_value.is_none()) {
+					if (not unpack_change_phase()) {
+						if (parameter.default_value.is_some()) {
 							parameter.type = parameter_type::positional_with_default;
 						} else {
 							throw type_error("Argument without default value cannot follow arguments with default values");
@@ -905,8 +909,8 @@ namespace viper_::detail {
 					}
 					break;
 				case keyword_args:
-					if (!unpack_change_phase()) {
-						if (!parameter.default_value.is_none()) {
+					if (not unpack_change_phase()) {
+						if (parameter.default_value.is_some()) {
 							parameter.type = parameter_type::keyword_with_default;
 						} else {
 							parameter.type = parameter_type::keyword;
@@ -1001,7 +1005,7 @@ namespace viper_::detail {
 								break;
 							}
 						}
-						if (!parameter_matched) {
+						if (not parameter_matched) {
 							if (m_has_keyword_catcher) {
 
 							} else {
@@ -1015,7 +1019,7 @@ namespace viper_::detail {
 				} else {
 
 				}
-			} else /* if (state.phase == argument_phase::keyword) */ {
+			} else /* state.phase == argument_phase::keyword */ {
 				if constexpr (is_variable) {
 					if (value value = argument.steal_last_assignment()) {
 						state.phase = argument_phase::keyword;
@@ -1121,7 +1125,7 @@ namespace viper_::detail {
 			if (out[i] == '{') {
 				inside_format = true;
 				begin_format = i;
-			} else if (inside_format && out[i] == '}') {
+			} else if (inside_format and out[i] == '}') {
 				inside_format = false;
 				const int variable_length = i - begin_format - 1;
 
@@ -1323,7 +1327,7 @@ namespace viper_ {
 //     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution with short identifiers
 //     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _ or f)
 
-#if !defined(VIPER_NO_NAMESPACE_POLLUTION)
+#if not defined(VIPER_NO_NAMESPACE_POLLUTION)
 	using namespace viper_::literals;
 	using viper_::hint;
 	using viper_::type_error;
@@ -1332,9 +1336,9 @@ namespace viper_ {
 
 	using viper_::True;
 	using viper_::False;
-#endif // !defined(VIPER_NO_NAMESPACE_POLLUTION)
+#endif // not defined(VIPER_NO_NAMESPACE_POLLUTION)
 
-#if !defined(VIPER_NO_MACRO_POLLUTION)
+#if not defined(VIPER_NO_MACRO_POLLUTION)
 	#define _ _VIPER_UNDERSCORE
 
 	#define in VIPER_IN
@@ -1344,7 +1348,7 @@ namespace viper_ {
 	#define def VIPER_DEF
 
 	#define col VIPER_COLON
-#endif // !defined(VIPER_NO_MACRO_POLLUTION)
+#endif // not defined(VIPER_NO_MACRO_POLLUTION)
 
 
 /*~-------------------------------------------------------------------------~*\
