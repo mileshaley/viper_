@@ -285,6 +285,11 @@ namespace viper_::detail {
 		{
 		}
 
+		inline value(std::nullptr_t)
+			: m_data(nullptr)
+		{
+		}
+
 		template<typename T>
 		inline value(T data)
 			: m_data(std::make_shared<value_data>(std::move(data), true))
@@ -833,7 +838,7 @@ namespace viper_::detail {
 		};
 
 		struct process_arguments_state {
-			enum argument_phase : int8_t {
+			enum class argument_phase : int8_t {
 				positional = 0,
 				keyword
 			} phase;
@@ -948,7 +953,7 @@ namespace viper_::detail {
 	public: // Calling
 
 		template<class... Args>
-		inline value operator()(Args&... args) {
+		inline value operator()(Args&&... args) {
 			// We assume at first that all arguments passed are valid, meaning all parameter variables will need to be pushed
 			// Only wastes time in pushing variables if there is an exception in processing the arguments which is insignificant
 			for (parameter& parameter : m_parameters) {
@@ -961,18 +966,16 @@ namespace viper_::detail {
 				for (parameter const& parameter : m_parameters) {
 					parameter.variable->pop();
 				}
-				if constexpr (sizeof...(Args) > 0) {
-					reset_passed_variable_states<Args...>(args...);
-				}
+				((reset_passed_variable_state(std::forward<Args>(args))), ...);
 			};
 			// process_arguments with 0 Args won't compile
 			if constexpr (sizeof...(Args) > 0) {
 				try {
 					// Initialize a mutable state for process_arguments to work with
 					process_arguments_state state{
-						.phase = process_arguments_state::positional,
+						.phase = process_arguments_state::argument_phase::positional,
 					};
-					process_arguments<0llu, Args...>(state, args...);
+					process_arguments<0llu>(state, std::forward<Args>(args)...);
 				} catch (...) {
 					reset_variables();
 					throw;
@@ -1008,13 +1011,10 @@ namespace viper_::detail {
 		}
 
 		// Used by process_arguments to reset any remaining variable states in the event of an exception
-		template<class First, class... Rest>
-		inline constexpr void reset_passed_variable_states(First& first, Rest&... rest) {
-			if constexpr (std::is_same_v<First, variable>) {
-				first.reset_buffered_state();
-			}
-			if constexpr (sizeof...(Rest) > 0) {
-				reset_passed_variable_states<Rest...>(rest...);
+		template<class T>
+		inline constexpr void reset_passed_variable_state(T&& argument) {
+			if constexpr (std::is_same_v<T, variable>) {
+				argument.reset_buffered_state();
 			}
 		}
 
@@ -1090,7 +1090,7 @@ namespace viper_::detail {
 		}
 
 		template<size_t Index, class T>
-		inline void process_argument(process_arguments_state& state, T& argument) {
+		inline void process_argument(process_arguments_state& state, T const& argument) {
 			using argument_phase = process_arguments_state::argument_phase;
 			if (state.phase == argument_phase::positional) {
 				const parameter_type current_parameter_type = m_parameters[Index].type;
@@ -1113,22 +1113,15 @@ namespace viper_::detail {
 		}
 
 		template<size_t Index, class First, class... Rest>
-		inline constexpr void process_arguments(process_arguments_state& state, First& first, Rest&... rest) {
-			//try {
-				if constexpr (std::is_same_v<First, variable>) {
-					process_variable_argument<Index, First>(state, first);
-				} else {
-					process_argument<Index, First>(state, first);
-				}
-			//} catch (...) {
-			//	// In the event of any exception from argument processing, reset the states of the rest of any variables passed
-			//	//if constexpr (sizeof...(Rest) > 0) {
-			//	//	reset_passed_variable_states<First, Rest...>(first, rest...);
-			//	//}
-			//	throw;
-			//}
+		inline constexpr void process_arguments(process_arguments_state& state, First&& first, Rest&&... rest) {
+			// Stop forwarding argument types here, we know we want mutable variables and immutable everything else
+			if constexpr (std::is_same_v<First, variable>) {
+				process_variable_argument<Index, First>(state, first);
+			} else {
+				process_argument<Index, First>(state, first);
+			}
 			if constexpr (sizeof...(Rest) > 0) {
-				process_arguments<Index + 1, Rest...>(state, rest...);
+				process_arguments<Index + 1>(state, std::forward<Rest>(rest)...);
 			}
 		}
 

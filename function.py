@@ -16,7 +16,22 @@ def main() -> None:
 
     foo(1, c=3, x='tra', j=15, b=4, k='hello', i=10) # okay
 
+    print("--"*20)
 
+    def bar(a, b, c, d, *e, w, x=2, y):
+        print(f"{a=}, {b=}, {c=}, {d=}, {e=}, {w=}, {x=}, {y=} \n{'-'*10}\n")
+    
+    bar(d=4,a=1,c=3,b=2) # okay
+
+    #bar(a=1,b=2,c=3) # not okay (missing argument without default)
+    #bar(a=1,b=2,c=3, 4) # not okay (positional d after any keyword)
+    bar(1,b=2,c=3, d=4) # okay
+
+
+    try:
+        bar(1, 2)
+    except Exception as e:
+        print(f"oops: {e}")
 
 
 if __name__ == "__main__":
