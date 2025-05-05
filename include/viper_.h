@@ -403,6 +403,7 @@ namespace viper_::detail {
 		static_assert(std::is_same_v<Variable, variable>, "generic_variable_stack only should be used with variable");
 	public: // Lifecycle
 		inline generic_variable_stack(std::string const& name = "__unnamed__")
+			// Invariant: there exists a minimum of 1 variable on a variable stack
 			: m_data(1)
 			, m_name(name)
 			, m_access_counter(0) {
@@ -410,7 +411,7 @@ namespace viper_::detail {
 		}
 
 		inline void pop() {
-			if (m_data.size() <= 1llu) {
+			if (m_data.size() > 1llu) {
 				m_data.pop_back();
 			}
 		}
@@ -526,6 +527,8 @@ namespace viper_::detail {
 			return *this;
 		}
 
+		//inline variable& operator=(value const& rhs) {}
+
 	public: // Access Operator
 
 		// To avoid issues with literal operator followed by .
@@ -536,7 +539,8 @@ namespace viper_::detail {
 	public: // Unpacking Operator
 
 		inline variable& operator*() {
-			const auto current_access_stamp = get_access_stamp();
+			if (m_owner == nullptr) { return *this; }
+			const auto current_access_stamp = m_owner->get_access_stamp();
 			if (m_unpack_count == 0) {
 				m_unpack_count = 1;
 			} else if (m_unpack_count == 1) {
@@ -598,6 +602,7 @@ namespace viper_::detail {
 			(void)steal_unpack_count();
 		}
 
+		/// TODO: Remove
 		inline std::any const& data() const {
 			return m_data.get().data().data();
 		}
@@ -617,6 +622,13 @@ namespace viper_::detail {
 			m_data.accept_last_assignment();
 		}
 
+		inline value const& get_value() const {
+			return m_data.get();
+		}
+
+		inline value& get_value() {
+			return m_data.get();
+		}
 
 		inline value steal_last_assignment() {
 			return m_data.steal_last_assignment();
@@ -628,9 +640,9 @@ namespace viper_::detail {
 			 
 	private: // Helpers
 
-		inline stamp::counter_t get_access_stamp() {
-			return m_owner ? m_owner->get_access_stamp() : std::numeric_limits<stamp::counter_t>::max();
-		}
+		//inline stamp::counter_t get_access_stamp() {
+		//	return m_owner ? m_owner->get_access_stamp() : std::numeric_limits<stamp::counter_t>::max();
+		//}
 
 		inline void create() {
 			m_active = true;
@@ -675,6 +687,11 @@ namespace viper_::detail {
 			}
 
 			inline value const& get() const {
+				accept_last_assignment();
+				return m_value;
+			}
+
+			inline value& get() {
 				accept_last_assignment();
 				return m_value;
 			}
@@ -797,7 +814,7 @@ namespace viper_::literals {
 
 namespace viper_::detail {
 	class function {
-	private: // Common helper types
+	private: // Helper types
 		enum class parameter_type : int8_t {
 			positional = 0,
 			positional_with_default,
@@ -812,6 +829,7 @@ namespace viper_::detail {
 			value default_value;
 			parameter_type type;
 			uint8_t unpack_count;
+			bool assigned_by_call;
 		};
 
 		struct process_arguments_state {
@@ -828,8 +846,8 @@ namespace viper_::detail {
 			: m_name(move(name))
 			, m_parameters()
 			, m_callable(move(callable))
-			, m_has_positional_catcher(false)
-			, m_has_keyword_catcher(false)
+			, m_positional_catcher_index(-1)
+			, m_keyword_catcher_index(-1)
 		{
 			enum parameter_phase : int {
 				positional = 0,
@@ -837,6 +855,8 @@ namespace viper_::detail {
 				keyword_args,
 				finished
 			} phase = positional;
+
+			/// TODO: check for duplicate parameter names in this function
 
 			m_parameters.reserve(parameters.size());
 			// We reset variable buffered states in this loop so that afterwards, 
@@ -860,7 +880,7 @@ namespace viper_::detail {
 				}
 			}
 
-			/// TODO: Provide more speicifics in exception including parameter name and index
+			/// TODO: Provide more specifics in exception including parameter name and index
 			for (size_t i = 0; i < parameters.size(); ++i) {
 				parameter& parameter = m_parameters[i];
 
@@ -872,7 +892,7 @@ namespace viper_::detail {
 						} else if (parameter.default_value.is_some()) {
 							throw type_error("**keyword arguments cannot have a default value");
 						}
-						m_has_positional_catcher = true;
+						m_positional_catcher_index = static_cast<int>(i);
 						phase = keyword_args;
 						parameter.type = parameter_type::positional_catcher;
 						return true;
@@ -881,7 +901,7 @@ namespace viper_::detail {
 							throw type_error("*arguments cannot have a default value");
 						}
 						// Args after **kwargs error handled below in finished case of phase switch
-						m_has_keyword_catcher = true;
+						m_keyword_catcher_index = static_cast<int>(i);
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
 						parameter.default_value.assign(std::make_shared<value_data>(std::make_any<std::unordered_map<std::string, value_data>>(), true));
@@ -928,20 +948,12 @@ namespace viper_::detail {
 	public: // Calling
 
 		template<class... Args>
-		inline value operator()(Args const&... args) {
+		inline value operator()(Args&... args) {
 			// We assume at first that all arguments passed are valid, meaning all parameter variables will need to be pushed
-			// Only wastes time if there is an exception in processing the arguments
-			for (parameter const& parameter : m_parameters) {
+			// Only wastes time in pushing variables if there is an exception in processing the arguments which is insignificant
+			for (parameter& parameter : m_parameters) {
 				parameter.variable->push();
-				auto& variable = parameter.variable->top();
-				// Should only be a minor performance impact to doubly assign parameters that 
-				// have default values since we're just copying a shared pointer
-				if (parameter.default_value) {
-					/// make this a deep copy if its a mutable type (maybe?)
-					variable = parameter.default_value;
-					// Bypass assignment buffering since we just created this variable
-					variable.accept_last_assignment();
-				}
+				parameter.assigned_by_call = false;
 			}
 
 			// Declared as a lambda so it can be called in case process_arguments throws an error
@@ -949,18 +961,36 @@ namespace viper_::detail {
 				for (parameter const& parameter : m_parameters) {
 					parameter.variable->pop();
 				}
+				if constexpr (sizeof...(Args) > 0) {
+					reset_passed_variable_states<Args...>(args...);
+				}
 			};
-
-			try {
-				// Initialize a mutable state for process_arguments to work with
-				process_arguments_state state{
-					process_arguments_state::positional,
-
-				};
-				process_arguments<0, Args...>(state, args...);
-			} catch (...) {
-				reset_variables();
-				throw;
+			// process_arguments with 0 Args won't compile
+			if constexpr (sizeof...(Args) > 0) {
+				try {
+					// Initialize a mutable state for process_arguments to work with
+					process_arguments_state state{
+						.phase = process_arguments_state::positional,
+					};
+					process_arguments<0llu, Args...>(state, args...);
+				} catch (...) {
+					reset_variables();
+					throw;
+				}
+			}
+			
+			// It's cleaner to check for missing arguments here than in process_arguments
+			for (parameter const& parameter : m_parameters) {
+				if (not parameter.assigned_by_call) {
+					if (parameter.default_value.is_none() 
+						and parameter.type != parameter_type::positional_catcher
+						and parameter.type != parameter_type::keyword_catcher
+					) {
+						throw type_error(std::format("Required parameter {} not passed in call to function", parameter.variable->name()));
+					} else {
+						parameter.variable->top().direct_assign(parameter.default_value);
+					}
+				}
 			}
 
 			value return_value = m_callable(*this);
@@ -968,7 +998,14 @@ namespace viper_::detail {
 			return return_value;
 		}
 
-	private:
+	private: // Helper Functions
+
+		inline bool has_positional_catcher() const {
+			return m_positional_catcher_index != -1;
+		}
+		inline bool has_keyword_catcher() const {
+			return m_keyword_catcher_index != -1;
+		}
 
 		// Used by process_arguments to reset any remaining variable states in the event of an exception
 		template<class First, class... Rest>
@@ -981,66 +1018,115 @@ namespace viper_::detail {
 			}
 		}
 
-		template<size_t Index, class T>
-		inline constexpr void process_argument(process_arguments_state& state, T& argument) {
+		inline void mark_parameter_assigned(parameter& parameter) {
+			if (std::exchange(parameter.assigned_by_call, true)) {
+				throw type_error(std::format("Parameter {} already assigned in call to function", parameter.variable->name()));
+			}
+		}
+
+		template<size_t Index>
+		inline void process_variable_argument(process_arguments_state& state, variable& argument) {
 			using argument_phase = process_arguments_state::argument_phase;
-			inline consteval bool is_variable = std::is_same_v<T, variable>;
+			const auto keyword_matches_name = [&keyword = argument.get_owner()->name()](auto const& parameter) {
+				return parameter.variable->name() == keyword;
+			};
 
 			if (state.phase == argument_phase::positional) {
-				if constexpr (is_variable) {
-					// This functionally ensures that we are dealing with a non-const variable as T and enables better type checking
-					variable& argument = static_cast<variable&>(argument);
-
-					/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
-					if (value value = argument.steal_last_assignment()) {
-						//variable_storage const& variables = variable_storage::global_context();
-						state.phase = argument_phase::keyword;
-						bool parameter_matched = false;
-						std::string const& keyword = argument.get_owner()->name();
-						for (parameter& parameter : m_parameters) {
-							if (parameter.variable->name() == keyword) {
-								parameter_matched = true;
-								parameter.variable->top() = argument;
-								parameter.variable->top().accept_last_assignment();
-								break;
-							}
+				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
+				value assigned_value = argument.steal_last_assignment();
+				if (assigned_value.is_some()) {
+					state.phase = argument_phase::keyword;
+					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
+					if (matching_parameter != m_parameters.end()) {
+						// We don't count naming a positional parameter in the correct order as a keyword argument
+						if (static_cast<size_t>(matching_parameter - m_parameters.begin()) == Index) {
+							state.phase = argument_phase::positional;
 						}
-						if (not parameter_matched) {
-							if (m_has_keyword_catcher) {
-
-							} else {
-								throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
-							}
+						mark_parameter_assigned(*matching_parameter);
+						matching_parameter->variable->top().direct_assign(argument.get_value());
+					} else {
+						if (has_keyword_catcher()) {
+							/// Add key to keyword catcher dict here
+							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+						} else {
+							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
 						}
-
 					}
-
-
-				} else {
-
+				} else /* assigned_value.is_none() */ {
+					const parameter_type current_parameter_type = m_parameters[Index].type;
+					if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
+						if (has_positional_catcher()) {
+							/// Append to end of keyword catcher tuple here
+							//m_parameters[m_positional_catcher_index].variable->top().get_value().
+						} else {
+							throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
+						}
+					} else {
+						parameter& parameter = m_parameters[Index];
+						mark_parameter_assigned(parameter);
+						parameter.variable->top().direct_assign(argument.get_value());
+					}
 				}
 			} else /* state.phase == argument_phase::keyword */ {
-				if constexpr (is_variable) {
-					if (value value = argument.steal_last_assignment()) {
-						state.phase = argument_phase::keyword;
+				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
+				value assigned_value = argument.steal_last_assignment();
+				if (assigned_value.is_some()) {
+					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
+					if (matching_parameter != m_parameters.end()) {
+						mark_parameter_assigned(*matching_parameter);
+						matching_parameter->variable->top().direct_assign(argument.get_value());
+					} else {
+						if (has_keyword_catcher()) {
+							/// Add key to keyword catcher dict here
+							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+						} else {
+							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+						}
+					}
+				} else /* assigned_value.is_none() */ {
+					throw type_error("Cannot place positional arguments after keyword arguments");
+				}
+			}
+		}
+
+		template<size_t Index, class T>
+		inline void process_argument(process_arguments_state& state, T& argument) {
+			using argument_phase = process_arguments_state::argument_phase;
+			if (state.phase == argument_phase::positional) {
+				const parameter_type current_parameter_type = m_parameters[Index].type;
+				if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
+					if (has_positional_catcher()) {
+						/// Append to end of keyword catcher tuple here
+						//m_parameters[m_positional_catcher_index].variable->top().get_value().
+					} else {
+						throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
 					}
 				} else {
-
+					parameter& parameter = m_parameters[Index];
+					mark_parameter_assigned(parameter);
+					/// TODO: Consider removing value() here
+					parameter.variable->top().direct_assign(value(argument));
 				}
+			} else /* state.phase == argument_phase::keyword */ {
+				throw type_error("Cannot place positional arguments after keyword arguments");
 			}
 		}
 
 		template<size_t Index, class First, class... Rest>
 		inline constexpr void process_arguments(process_arguments_state& state, First& first, Rest&... rest) {
-			try {
-				process_argument<Index, First>(state, first);
-			} catch (...) {
-				// In the event of any exception from argument processing, reset the states of the rest of any variables passed
-				if constexpr (sizeof...(Rest) > 0) {
-					reset_passed_variable_states<Rest...>(rest...);
+			//try {
+				if constexpr (std::is_same_v<First, variable>) {
+					process_variable_argument<Index, First>(state, first);
+				} else {
+					process_argument<Index, First>(state, first);
 				}
-				throw;
-			}
+			//} catch (...) {
+			//	// In the event of any exception from argument processing, reset the states of the rest of any variables passed
+			//	//if constexpr (sizeof...(Rest) > 0) {
+			//	//	reset_passed_variable_states<First, Rest...>(first, rest...);
+			//	//}
+			//	throw;
+			//}
 			if constexpr (sizeof...(Rest) > 0) {
 				process_arguments<Index + 1, Rest...>(state, rest...);
 			}
@@ -1054,9 +1140,8 @@ namespace viper_::detail {
 		std::vector<parameter> m_parameters;
 		callable_type m_callable;
 
-		bool m_has_positional_catcher;
-		bool m_has_keyword_catcher;
-
+		int m_positional_catcher_index;
+		int m_keyword_catcher_index;
 	}; // class function
 } // namespace viper_::detail
 
@@ -1073,7 +1158,7 @@ namespace viper_::detail {
 			, m_parameters()
 		{}
 
-	private:
+	private: // Helper Traits
 		template<class Callable, class = void>
 		struct returns_void : std::false_type {};
 		template<class Callable>
@@ -1183,7 +1268,7 @@ namespace viper_ {
 
 namespace viper_ {
 	inline void print(std::string const& text) {
-		std::cout << text << std::flush;
+		std::cout << text << std::endl;
 	}
 } // namespace viper_
 
