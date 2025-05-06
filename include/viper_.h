@@ -285,15 +285,15 @@ namespace viper_::detail {
 
 	class value_data {
 	public:
-		value_data(std::any const& data, bool is_data_mutable)
+		value_data(std::any const& data, bool data_is_mutable)
 			: m_data(data)
-			, m_mutable(is_data_mutable) 
+			, m_mutable(data_is_mutable) 
 		{
 		}
 
-		value_data(std::any&& data, bool is_data_mutable)
+		value_data(std::any&& data, bool data_is_mutable)
 			: m_data(std::move(data))
-			, m_mutable(is_data_mutable)
+			, m_mutable(data_is_mutable)
 		{
 		}
 
@@ -950,7 +950,7 @@ namespace viper_::detail {
 						if (parameter.default_value.is_some()) {
 							throw type_error("*arguments cannot have a default value");
 						}
-						// Args after **kwargs error handled below in finished case of phase switch
+						// Arguments after **kwargs error handled below in finished case of phase switch
 						m_keyword_catcher_index = static_cast<int>(i);
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
@@ -997,8 +997,8 @@ namespace viper_::detail {
 
 	public: // Calling
 
-		template<class... Args>
-		inline value operator()(Args&&... args) {
+		template<class... Arguments>
+		inline value operator()(Arguments&&... arguments) {
 			// We assume at first that all arguments passed are valid, meaning all parameter variables will need to be pushed
 			// Only wastes time in pushing variables if there is an exception in processing the arguments which is insignificant
 			for (parameter& parameter : m_parameters) {
@@ -1011,16 +1011,16 @@ namespace viper_::detail {
 				for (parameter const& parameter : m_parameters) {
 					parameter.variable->pop();
 				}
-				((reset_passed_variable_state(std::forward<Args>(args))), ...);
+				((reset_passed_variable_state(std::forward<Arguments>(arguments))), ...);
 			};
-			// process_arguments with 0 Args won't compile
-			if constexpr (sizeof...(Args) > 0) {
+			// process_arguments with 0 Arguments won't compile
+			if constexpr (sizeof...(Arguments) > 0) {
 				try {
 					// Initialize a mutable state for process_arguments to work with
 					process_arguments_state state{
 						.phase = process_arguments_state::argument_phase::positional,
 					};
-					process_arguments<0llu>(state, std::forward<Args>(args)...);
+					process_arguments<0llu>(state, std::forward<Arguments>(arguments)...);
 				} catch (...) {
 					reset_variables();
 					throw;
@@ -1310,100 +1310,14 @@ namespace viper_ {
 	}
 } // namespace viper_
 
-//namespace viper_::detail {
-//
-//	inline std::string evaluate_string_to_string(std::string_view str) {
-//		size_t identifier_begin = 0;
-//		bool in_identifier = false;
-//	
-//		detail::variable_storage::map_type const& var_map
-//			= detail::variable_storage::global_context().map();
-//		detail::type_record_storage::map_type const& type_map
-//			= detail::type_record_storage::global_context().map();
-//	
-//		const auto get_variable = [&](size_t begin, size_t end) -> variable const* {
-//			auto var_it = var_map.find(std::string(str.substr(begin, end - begin)));
-//			if (var_it != var_map.end()) {
-//				return &var_it->second;
-//				//auto type_it = type_map.find(var_it->second.type_hash_code());
-//				//if (type_it != type_map.end()) {
-//				//	data_string = type_it->second->get_string_data(var_it->second.data());
-//				//}
-//			}
-//		};
-//	
-//	
-//		for (size_t i = 0; i < str.size(); ++i) {
-//			
-//			if (str[i] == ' ') {
-//				if (in_identifier) {
-//	
-//				} else {
-//					
-//				}
-//			}
-//	
-//		}
-//	
-//	
-//	
-//	
-//	}
-//} // namespace viper_::detail
-
-//namespace viper_ {
-//
-//	inline void format_in_place(std::string& text) {
-//		int begin_format = -1;
-//		bool inside_format = false;
-//		for (int i = 0; i < text.size(); ++i) {
-//			if (inside_format) {
-//				if (text[i] == '=') {
-//					//const int expression_length = i - begin_format - 1;
-//
-//				}
-//				else if (text[i] == '}') {
-//
-//					inside_format = false;
-//					const int expression_length = i - begin_format - 1;
-//
-//					//detail::variable_storage::map_type const& var_map
-//					//	= detail::variable_storage::global_context().map();
-//					//detail::type_record_storage::map_type const& type_map
-//					//	= detail::type_record_storage::global_context().map();
-//
-//					std::string data_string = "{?}";
-//
-//
-//
-//					text.replace(begin_format, i - begin_format + 1, data_string);
-//					i += expression_length - 2; // -2 to account for {}
-//				}
-//			}
-//			else {
-//				if (text[i] == '{') {
-//					inside_format = true;
-//					begin_format = i;
-//				}
-//			}
-//		}
-//	}
-//
-//	inline void print(std::string text) {
-//		format_in_place(text);
-//		std::cout << text << std::endl;
-//	}
-//
-//} // namespace viper_
-
 /*~-------------------------------------------------------------------------~*\
- * Underscore Proxy                                                          *
+ * Underscore "Operator"                                                     *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_::detail {
-	class underscore_proxy {
+	class underscore {
 	public: 
-		inline underscore_proxy() {
+		inline underscore() {
 
 		}
 	}; // class underscore_proxy
@@ -1411,7 +1325,7 @@ namespace viper_::detail {
 
 // Intentionally located in the global namespace so _ macro can name this, the literal operator,
 // or the macro depending on if parenthesis are present after the identifier
-static inline viper_::detail::underscore_proxy _VIPER_UNDERSCORE;
+static inline viper_::detail::underscore _VIPER_UNDERSCORE;
 
 // Has a leading underscore so that the name can also be used for a user-defined literal operator
 #define _VIPER_UNDERSCORE(Type) VIPER_HINT(Type)
