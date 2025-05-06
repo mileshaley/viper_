@@ -25,6 +25,7 @@ int main() {
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
+	bar();
 	//bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");

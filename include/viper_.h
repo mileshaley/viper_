@@ -63,6 +63,32 @@ namespace viper_ {
 	}; // class type_error
 } // namespace viper_
 
+namespace viper_::detail {
+
+	class custom_termination_handler_instantiator {
+	public:
+
+		[[noreturn]] static inline void handler() {
+			if (std::exception_ptr exception = std::current_exception()) {
+				try {
+					std::rethrow_exception(exception);
+				} catch (type_error const& error) {
+					std::cerr << "TypeError: " << error.what() << std::endl;
+				} catch (syntax_error const& error) {
+					std::cerr << "SyntaxError: " << error.what() << std::endl;
+				}
+			}
+			std::abort();
+		}
+
+		custom_termination_handler_instantiator() {
+			std::set_terminate(handler);
+		}
+	};
+
+	static inline const custom_termination_handler_instantiator custom_termination_handler_instantiator_instance{};
+
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * String Representation of Data                                             *
@@ -207,7 +233,7 @@ namespace viper_::detail {
 	template<typename T>
 	class instantiate_type {
 	public:
-		static inline const type_instatiatior<T> global_instantiator{};
+		static inline const type_instatiatior<T> instance{};
 	}; // class type_instatiatior
 
 } // namespace viper_::detail
