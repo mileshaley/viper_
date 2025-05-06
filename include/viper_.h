@@ -63,6 +63,10 @@ namespace viper_ {
 	}; // class type_error
 } // namespace viper_
 
+/*~-------------------------------------------------------------------------~*\
+ * Program Termination Handling                                              *
+\*~-------------------------------------------------------------------------~*/
+
 namespace viper_::detail {
 
 	class custom_termination_handler_instantiator {
@@ -74,8 +78,10 @@ namespace viper_::detail {
 					std::rethrow_exception(exception);
 				} catch (type_error const& error) {
 					std::cerr << "TypeError: " << error.what() << std::endl;
+					std::exit(3);
 				} catch (syntax_error const& error) {
 					std::cerr << "SyntaxError: " << error.what() << std::endl;
+					std::exit(3);
 				}
 			}
 			std::abort();
