@@ -40,26 +40,39 @@ namespace viper_::detail {
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_ {
-	class type_error : public std::runtime_error {
+	namespace detail {
+		class exception : public std::runtime_error {
+		public:
+			exception(std::string const& message)
+				: std::runtime_error(message)
+			{}
+			exception(const char* message)
+				: std::runtime_error(message)
+			{}
+
+		}; // class exception
+	} // namespace detail
+
+	class type_error : public detail::exception {
 	public:
 		explicit type_error(std::string const& message)
-			: runtime_error(message) {
-		}
-
+			: detail::exception(message) 
+		{}
 		explicit type_error(const char* message)
-			: runtime_error(message) {
-		}
+			: detail::exception(message) 
+		{}
+
 	}; // class type_error
 
-	class syntax_error : public std::runtime_error {
+	class syntax_error : public detail::exception {
 	public:
 		explicit syntax_error(std::string const& message)
-			: runtime_error(message) {
-		}
-
+			: detail::exception(message)
+		{}
 		explicit syntax_error(const char* message)
-			: runtime_error(message) {
-		}
+			: detail::exception(message)
+		{}
+
 	}; // class type_error
 } // namespace viper_
 
