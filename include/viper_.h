@@ -305,7 +305,7 @@ namespace viper_::detail {
 			return m_data.type();
 		}
 
-		std::any const& data() const {
+		std::any const& get_data_storage() const {
 			return m_data;
 		}
 
@@ -330,6 +330,7 @@ namespace viper_::detail {
 		{
 		}
 
+		/// TODO: Remove nullptr and T constructors and make it more explicit. what if the user wanted to store a nullptr in a value?
 		inline value(std::nullptr_t)
 			: m_data(nullptr)
 		{
@@ -393,10 +394,10 @@ namespace viper_::detail {
 		inline bool operator==(T const& rhs) const {
 			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 			if constexpr (has_equals<T>::value) {
-				if (not m_data or not m_data->data().has_value() or m_data->type() != typeid(std::decay_t<T>)) {
+				if (not m_data or not m_data->get_data_storage().has_value() or m_data->type() != typeid(std::decay_t<T>)) {
 					return false;
 				}
-				return std::any_cast<T>(m_data->data()) == rhs;
+				return std::any_cast<T>(m_data->get_data_storage()) == rhs;
 			} else {
 				return false;
 			}
@@ -415,7 +416,7 @@ namespace viper_::detail {
 			type_record const* my_type = type_records.find(m_data->type().hash_code());
 			/// TODO: Maybe this should be an error
 			if (my_type == nullptr) { return false; }
-			return my_type->equal(m_data->data(), rhs.m_data->data());
+			return my_type->equal(m_data->get_data_storage(), rhs.m_data->get_data_storage());
 		}
 
 	private: // Data Member
@@ -522,6 +523,7 @@ namespace viper_::detail {
 			, m_active(false)
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
+			, m_previous_assignment_stamp(0)
 		{
 		}
 
@@ -532,7 +534,7 @@ namespace viper_::detail {
 			, m_active(other.m_active)
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
-		{
+			, m_previous_assignment_stamp(0) {
 		}
 
 		variable(variable&& other) noexcept
@@ -542,10 +544,10 @@ namespace viper_::detail {
 			, m_active(std::exchange(other.m_active, false))
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
-		{
+			, m_previous_assignment_stamp(0) {
 		}
 
-		~variable() {}
+		~variable() = default;
 
 		inline void set_owner(variable_stack* owner) {
 			m_owner = owner;
@@ -560,8 +562,9 @@ namespace viper_::detail {
 		// Rebind variable name to the value of another variable
 		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
+			m_previous_assignment_stamp = m_owner->get_access_stamp();
 			//check_assignment_type(rhs.m_internal_value->type());
-			m_data.assign(rhs.m_data.get());
+			m_data.assign(rhs.get_value());
 			create();
 			return *this;
 		}
@@ -569,6 +572,7 @@ namespace viper_::detail {
 		/// TODO: rhs has to be passed by value otherwise T will be innacurate when const. Find a fix
 		template<typename T>
 		inline variable& operator=(T rhs) {
+			m_previous_assignment_stamp = m_owner->get_access_stamp();
 			// Explicitly instantiate reflection for T 
 			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 			//check_assignment_type(typeid(std::decay_t<T>));
@@ -589,7 +593,6 @@ namespace viper_::detail {
 	public: // Unpacking Operator
 
 		inline variable& operator*() {
-			if (m_owner == nullptr) { return *this; }
 			const auto current_access_stamp = m_owner->get_access_stamp();
 			if (m_unpack_count == 0) {
 				m_unpack_count = 1;
@@ -650,11 +653,6 @@ namespace viper_::detail {
 		inline void reset_syntax_state() {
 			(void)steal_last_assignment();
 			(void)steal_unpack_count();
-		}
-
-		/// TODO: Remove
-		inline std::any const& data() const {
-			return m_data.get().data().data();
 		}
 
 		inline size_t type_hash_code() const {
@@ -726,6 +724,7 @@ namespace viper_::detail {
 			{}
 
 			inline void assign(value const& new_value) {
+				accept_last_assignment();
 				m_last_assignment.assign(new_value);
 			}
 
@@ -769,6 +768,7 @@ namespace viper_::detail {
 		bool m_active;
 		uint8_t m_unpack_count;
 		stamp::counter_t m_previous_unpack_access_stamp;
+		stamp::counter_t m_previous_assignment_stamp;
 	}; // class variable
 
 } // namespace viper_::detail
@@ -1058,8 +1058,8 @@ namespace viper_::detail {
 		// Used by process_arguments to reset any remaining variable states in the event of an exception
 		template<class T>
 		inline constexpr void reset_passed_variable_state(T&& argument) {
-			if constexpr (std::is_same_v<T, variable>) {
-				argument.reset_buffered_state();
+			if constexpr (std::is_same_v<std::decay_t<T>, variable>) {
+				argument.reset_syntax_state();
 			}
 		}
 
@@ -1083,15 +1083,16 @@ namespace viper_::detail {
 					state.phase = argument_phase::keyword;
 					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
 					if (matching_parameter != m_parameters.end()) {
+						/// TODO: Reconsider this because it doesn't actually match Python's behavior
 						// We don't count naming a positional parameter in the correct order as a keyword argument
 						if (static_cast<size_t>(matching_parameter - m_parameters.begin()) == Index) {
 							state.phase = argument_phase::positional;
 						}
 						mark_parameter_assigned(*matching_parameter);
-						matching_parameter->variable->top().direct_assign(argument.get_value());
+						matching_parameter->variable->top().direct_assign(assigned_value);
 					} else {
 						if (has_keyword_catcher()) {
-							/// Add key to keyword catcher dict here
+							/// TODO: Add key to keyword catcher dict here
 							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
 						} else {
 							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
@@ -1101,7 +1102,7 @@ namespace viper_::detail {
 					const parameter_type current_parameter_type = m_parameters[Index].type;
 					if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
 						if (has_positional_catcher()) {
-							/// Append to end of keyword catcher tuple here
+							/// TODO: Append to end of keyword catcher tuple here
 							//m_parameters[m_positional_catcher_index].variable->top().get_value().
 						} else {
 							throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
@@ -1119,10 +1120,10 @@ namespace viper_::detail {
 					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
 					if (matching_parameter != m_parameters.end()) {
 						mark_parameter_assigned(*matching_parameter);
-						matching_parameter->variable->top().direct_assign(argument.get_value());
+						matching_parameter->variable->top().direct_assign(assigned_value);
 					} else {
 						if (has_keyword_catcher()) {
-							/// Add key to keyword catcher dict here
+							/// TODO: Add key to keyword catcher dict here
 							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
 						} else {
 							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
@@ -1141,7 +1142,7 @@ namespace viper_::detail {
 				const parameter_type current_parameter_type = m_parameters[Index].type;
 				if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
 					if (has_positional_catcher()) {
-						/// Append to end of keyword catcher tuple here
+						/// TODO: Append to end of keyword catcher tuple here
 						//m_parameters[m_positional_catcher_index].variable->top().get_value().
 					} else {
 						throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
@@ -1149,7 +1150,6 @@ namespace viper_::detail {
 				} else {
 					parameter& parameter = m_parameters[Index];
 					mark_parameter_assigned(parameter);
-					/// TODO: Consider removing value() here
 					parameter.variable->top().direct_assign(value(argument));
 				}
 			} else /* state.phase == argument_phase::keyword */ {
@@ -1160,8 +1160,8 @@ namespace viper_::detail {
 		template<size_t Index, class First, class... Rest>
 		inline constexpr void process_arguments(process_arguments_state& state, First&& first, Rest&&... rest) {
 			// Stop forwarding argument types here, we know we want mutable variables and immutable everything else
-			if constexpr (std::is_same_v<First, variable>) {
-				process_variable_argument<Index, First>(state, first);
+			if constexpr (std::is_same_v<std::decay_t<First>, variable>) {
+				process_variable_argument<Index>(state, first);
 			} else {
 				process_argument<Index, First>(state, first);
 			}
@@ -1261,7 +1261,7 @@ namespace viper_::detail {
 				if (var_it != variables.end()) {
 					type_record const* type = types.find(var_it->second.top().type_hash_code());
 					if (type) {
-						data_string = type->get_string_data(var_it->second.top().data());
+						data_string = type->get_string_data(var_it->second.top().get_value().data().get_data_storage());
 					}
 				}
 

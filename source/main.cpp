@@ -15,18 +15,17 @@ int main() {
 	"param2"_ = "original2";
 	"param3"_ = "original3";
 
+	//print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
+	//
+	//bar(2);
+	//
+	//print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
+	//
+	//bar(2, 3, 4);
+
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
-	bar(2);
-
-	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
-
-	bar(2, 3, 4);
-
-	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
-
-	//bar();
-	//bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
+	bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
