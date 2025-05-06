@@ -74,6 +74,26 @@ namespace viper_ {
 		{}
 
 	}; // class type_error
+
+	class index_error : public detail::exception {
+	public:
+		explicit index_error(std::string const& message)
+			: detail::exception(message) 
+		{}
+		explicit index_error(const char* message)
+			: detail::exception(message) 
+		{}
+	};
+
+	class value_error : public detail::exception {
+	public:
+		explicit value_error(std::string const& message)
+			: detail::exception(message) {
+		}
+		explicit value_error(const char* message)
+			: detail::exception(message) {
+		}
+	};
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
@@ -94,6 +114,12 @@ namespace viper_::detail {
 					std::exit(3);
 				} catch (syntax_error const& error) {
 					std::cerr << "SyntaxError: " << error.what() << std::endl;
+					std::exit(3);
+				} catch (index_error const& error) {
+					std::cerr << "IndexError: " << error.what() << std::endl;
+					std::exit(3);
+				} catch (value_error const& error) {
+					std::cerr << "ValueError: " << error.what() << std::endl;
 					std::exit(3);
 				}
 			}
@@ -194,7 +220,7 @@ namespace viper_::detail {
 				if (a.type() != b.type() or not a.has_value() or not b.has_value()) {
 					return false;
 				}
-				return std::any_cast<T>(a) == std::any_cast<T>(b);
+				return std::any_cast<std::decay_t<T>>(a) == std::any_cast<std::decay_t<T>>(b);
 			} else {
 				return false;
 			}
@@ -353,7 +379,7 @@ namespace viper_::detail {
 		inline value(T data)
 			: m_data(std::make_shared<value_data>(std::move(data), true))
 		{
-			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
+			VIPER_INTERNAL_INSTANTIATE_TYPE(std::decay_t<T>);
 		}
 
 		inline value(value const& other)
@@ -377,6 +403,10 @@ namespace viper_::detail {
 
 		inline void assign(value const& new_value) {
 			m_data = new_value.m_data;
+		}
+
+		value& operator=(value const& rhs) {
+			m_data = rhs.m_data;
 		}
 
 
@@ -405,12 +435,12 @@ namespace viper_::detail {
 
 		template<typename T>
 		inline bool operator==(T const& rhs) const {
-			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
+			VIPER_INTERNAL_INSTANTIATE_TYPE(std::decay_t<T>);
 			if constexpr (has_equals<T>::value) {
 				if (not m_data or not m_data->get_data_storage().has_value() or m_data->type() != typeid(std::decay_t<T>)) {
 					return false;
 				}
-				return std::any_cast<T>(m_data->get_data_storage()) == rhs;
+				return std::any_cast<std::decay_t<T>>(m_data->get_data_storage()) == static_cast<std::decay_t<const T>>(rhs);
 			} else {
 				return false;
 			}
@@ -577,7 +607,7 @@ namespace viper_::detail {
 		inline variable& operator=(T rhs) {
 			m_previous_assignment_stamp = get_access_stamp();
 			// Explicitly instantiate reflection for T 
-			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
+			VIPER_INTERNAL_INSTANTIATE_TYPE(std::decay_t<T>);
 			m_data.assign(value(rhs));
 			create();
 			return *this;
@@ -819,44 +849,6 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
- * Collection Types                                                          *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_ {
-
-	class list {
-	public:
-		list()
-			: m_values()
-		{}
-		
-		/// TODO: Don't pass elements by value
-		template<typename... Ts>
-		list(Ts... elements)
-			: m_values()
-		{
-			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
-			(void)(sizeof(::viper_::detail::instantiate_type<Ts>), ...);
-
-			m_values.reserve(sizeof...(Ts));
-			(m_values.emplace_back(elements), ...);
-		}
-
-		
-
-	private:
-		std::vector<detail::value> m_values;
-	}; // class list
-
-	class tuple {
-	public:
-
-	private:
-	}; // class tuple
-
-} // namespace viper_
-
-/*~-------------------------------------------------------------------------~*\
  * Value Access Helper                                                       *
 \*~-------------------------------------------------------------------------~*/
 
@@ -876,6 +868,106 @@ namespace viper_::detail {
 	}
 
 } // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Collection Types                                                          *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+
+	class list {
+		using in_index_t = std::int64_t;
+		using out_index_t = std::int64_t;
+	public: // Lifecycle
+		list()
+			: m_values()
+		{}
+		
+		template<typename... Ts>
+		list(Ts&&... elements)
+			: m_values()
+		{
+			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
+			(void)(sizeof(::viper_::detail::instantiate_type<std::decay_t<Ts>>), ...);
+
+			m_values.reserve(sizeof...(Ts));
+			(m_values.emplace_back(detail::to_value(std::forward<Ts>(elements))), ...);
+		}
+
+		detail::value pop(in_index_t index = -1) {
+			const size_t real_index = fix_index(index);
+			if (not in_range(real_index)) {
+				throw index_error("pop index out of range");
+			}
+			detail::value popped = m_values[real_index];
+			m_values.erase(m_values.begin() + real_index);
+			return popped;
+		}
+
+		template<typename T>
+		void append(T&& element) {
+			m_values.emplace_back(detail::to_value(std::forward<T>(element)));
+		}
+
+		template<typename T>
+		out_index_t index(T const& element, in_index_t start = 0, in_index_t stop = -1) const {
+			const size_t real_start_index = fix_index(start);
+			if (not in_range(real_start_index)) {
+				throw index_error("index start out of range");
+			}
+			const size_t real_stop_index = fix_index(stop);
+			if (not in_range(real_stop_index - 1)) {
+				throw index_error("index stop out of range");
+			}
+
+			const auto not_in_list_error = [&]() {
+				std::string stringized_element = detail::string_representation<T>::get(element);
+				if (stringized_element.empty()) {
+					stringized_element = "[?]";
+				}
+				throw value_error(std::format("{} is not in list", stringized_element));
+			};
+
+			if (real_start_index >= real_stop_index) {
+				not_in_list_error();
+			}
+			
+			for (size_t i = real_start_index; i < real_stop_index; ++i) {
+				// We make value::operator== do the work resolving between T and value
+				if (m_values[i] == element) {
+					return static_cast<out_index_t>(i);
+				}
+			}
+			not_in_list_error();
+			return -1;
+		}
+
+		
+	public: // Dunder Methods
+		size_t __len__() const {
+			return m_values.size();
+		}
+
+	private: // Helper Methods
+		size_t fix_index(in_index_t index) const {
+			return static_cast<size_t>(index >= 0 ? index : m_values.size() + index + 1);
+		}
+
+		bool in_range(size_t index) const {
+			return index < m_values.size();
+		}
+
+	private:
+		std::vector<detail::value> m_values;
+	}; // class list
+
+	class tuple {
+	public:
+
+	private:
+	}; // class tuple
+
+} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Functions                                                                 *

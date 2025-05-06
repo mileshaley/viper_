@@ -43,6 +43,15 @@ def main() -> None:
     a = 'hi'
     print(a)
 
+    a = ["one", "two", "three"]
+    print(a.__len__())
+    #a = None
+
+    #print(a.pop(-4))
+    #print(a.pop(-1))
+
+    print("plung ", a.index("two", 2, 1))
+
     print("--"*20)
 
     def baz(a, b, c, d, *e, w, x=2, y):
