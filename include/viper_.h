@@ -22,7 +22,7 @@
 \*~-------------------------------------------------------------------------~*/
 
 #define VIPER_INTERNAL_FILELINE (::std::string(__FILE__) + "?" + ::std::to_string(__LINE__))
-#define VIPER_INTERNAL_INSTANTIATE_TYPE(Type) (void)sizeof(instantiate_type<Type>)
+#define VIPER_INTERNAL_INSTANTIATE_TYPE(Type) (void)sizeof(::viper_::detail::instantiate_type<Type>)
 
 /*~-------------------------------------------------------------------------~*\
  * Forward Declarations                                                      *
@@ -170,6 +170,7 @@ namespace viper_::detail {
 		type_record() = default;
 		virtual ~type_record() = default;
 		virtual std::string get_string_data(std::any const& data) const = 0;
+		virtual const char* get_type_name() const = 0;
 		virtual bool equal(std::any const& a, std::any const& b) const = 0;
 	}; // class type_record
 
@@ -182,6 +183,10 @@ namespace viper_::detail {
 
 		virtual std::string get_string_data(std::any const& data) const override {
 			return string_representation<T>::get(std::any_cast<T const&>(data));
+		}
+
+		virtual const char* get_type_name() const override {
+			return typeid(T).name();
 		}
 
 		virtual bool equal(std::any const& a, std::any const& b) const override {
@@ -224,6 +229,12 @@ namespace viper_::detail {
 		template<typename T>
 		inline void register_type(size_t key) {
 			m_data.try_emplace(key, static_cast<type_record*>(new typed_type_record<T>()));
+		}
+
+		void dump_type_names() const {
+			for (auto const& record : m_data) {
+				std::cout << record.second->get_type_name() << std::endl;
+			}
 		}
 
 	private:
@@ -330,7 +341,9 @@ namespace viper_::detail {
 		{
 		}
 
-		/// TODO: Remove nullptr and T constructors and make it more explicit. what if the user wanted to store a nullptr in a value?
+		/// TODO: Remove nullptr and T constructors and make it more explicit. Why? What if the user wanted to store a nullptr in a value?
+		/// Perhaps we should make a make_value function to match shared_ptr semantics
+		
 		inline value(std::nullptr_t)
 			: m_data(nullptr)
 		{
@@ -424,6 +437,43 @@ namespace viper_::detail {
 	}; // class value
 
 } // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Collection Types                                                          *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+
+	class list {
+	public:
+		list()
+			: m_values()
+		{}
+		
+		template<typename... Ts>
+		list(Ts... elements)
+			: m_values()
+		{
+			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
+			(void)(sizeof(::viper_::detail::instantiate_type<Ts>), ...);
+
+			m_values.reserve(sizeof...(Ts));
+			(m_values.emplace_back(elements), ...);
+		}
+
+
+
+	private:
+		std::vector<detail::value> m_values;
+	}; // class list
+
+	class tuple {
+	public:
+
+	private:
+	}; // class tuple
+
+} // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
  * Variable Access Stamps                                                    *
@@ -958,7 +1008,7 @@ namespace viper_::detail {
 						m_keyword_catcher_index = static_cast<int>(i);
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
-						parameter.default_value.assign(std::make_shared<value_data>(std::make_any<std::unordered_map<std::string, value_data>>(), true));
+						parameter.default_value.assign(std::unordered_map<std::string, value>());
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
@@ -1015,7 +1065,7 @@ namespace viper_::detail {
 				for (parameter const& parameter : m_parameters) {
 					parameter.variable->pop();
 				}
-				((reset_passed_variable_state(std::forward<Arguments>(arguments))), ...);
+				((reset_passed_variable_syntax_state(std::forward<Arguments>(arguments))), ...);
 			};
 			// process_arguments with 0 Arguments won't compile
 			if constexpr (sizeof...(Arguments) > 0) {
@@ -1061,7 +1111,7 @@ namespace viper_::detail {
 
 		// Used by process_arguments to reset any remaining variable states in the event of an exception
 		template<class T>
-		inline constexpr void reset_passed_variable_state(T&& argument) {
+		inline constexpr void reset_passed_variable_syntax_state(T&& argument) {
 			if constexpr (std::is_same_v<std::decay_t<T>, variable>) {
 				argument.reset_syntax_state();
 			}
@@ -1081,7 +1131,6 @@ namespace viper_::detail {
 			};
 
 			if (state.phase == argument_phase::positional) {
-				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
 				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
 					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {
@@ -1125,7 +1174,6 @@ namespace viper_::detail {
 					}
 				}
 			} else /* state.phase == argument_phase::keyword */ {
-				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
 				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
 					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {

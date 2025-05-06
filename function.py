@@ -18,9 +18,9 @@ def main() -> None:
 
     print("--"*20)
 
-    def bar(a, b, c, d, *e, w, x=2, y):
-        print(f"{a=}, {b=}, {c=}, {d=}, {e=}, {w=}, {x=}, {y=} \n{'-'*10}\n")
     
+    def bar(a, b, c, d):
+        print(f"{a=}, {b=}, {c=}, {d=} \n{'-'*10}\n")
     bar(d=4,a=1,c=3,b=2) # okay
 
     #bar(a=1,b=2,c=3) # not okay (missing argument without default)
@@ -32,6 +32,21 @@ def main() -> None:
         bar(1, 2)
     except Exception as e:
         print(f"oops: {e}")
+
+    def bar(a, b, c, d, *e, w, x=2, y):
+        print(f"{a=}, {b=}, {c=}, {d=}, {e=}, {w=}, {x=}, {y=} \n{'-'*10}\n")
+
+    print("--"*20)
+    a = 2
+    print(a)
+
+    a = 'hi'
+    print(a)
+
+    print("--"*20)
+
+    def baz(a, b, c, d, *e, w, x=2, y):
+        print(f"{a=}, {b=}, {c=}, {d=}, {e=}, {w=}, {x=}, {y=} \n{'-'*10}\n")
 
 
 if __name__ == "__main__":
