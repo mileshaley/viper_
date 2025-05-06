@@ -566,7 +566,6 @@ namespace viper_::detail {
 	public: // Lifecycle
 		variable(variable_stack* owner)
 			: m_data()
-			, m_hint()
 			, m_owner(owner)
 			, m_active(false)
 			, m_unpack_count(0)
@@ -577,7 +576,6 @@ namespace viper_::detail {
 
 		variable(variable const& other, variable_stack* owner)
 			: m_data(other.m_data)
-			, m_hint(other.m_hint)
 			, m_owner(owner)
 			, m_active(other.m_active)
 			, m_unpack_count(0)
@@ -587,7 +585,6 @@ namespace viper_::detail {
 
 		variable(variable&& other, variable_stack* owner) noexcept
 			: m_data(std::move(other.m_data))
-			, m_hint(std::exchange(other.m_hint, nullptr))
 			, m_owner(owner)
 			, m_active(std::exchange(other.m_active, false))
 			, m_unpack_count(0)
@@ -607,7 +604,6 @@ namespace viper_::detail {
 		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
 			m_previous_assignment_stamp = get_access_stamp();
-			//check_assignment_type(rhs.m_internal_value->type());
 			m_data.assign(rhs.get_value());
 			create();
 			return *this;
@@ -619,7 +615,6 @@ namespace viper_::detail {
 			m_previous_assignment_stamp = get_access_stamp();
 			// Explicitly instantiate reflection for T 
 			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
-			//check_assignment_type(typeid(std::decay_t<T>));
 			m_data.assign(value(rhs));
 			create();
 			return *this;
@@ -654,40 +649,6 @@ namespace viper_::detail {
 			m_previous_unpack_access_stamp = current_access_stamp;
 			return *this;
 		}
-
-	public: // Type Hinting
-
-		// This one doesn't work yet due to operator precedence
-		// It can be fixed if hint<T> is given an operator= that returns a proxy variable
-		//template<typename T>
-		//inline variable& operator=(hint<T>) {
-		//	return this->hint<T>();
-		//}
-
-		//template<typename T>
-		//inline constexpr variable& operator^(hint<T>) {
-		//	return this->hint<T>();
-		//}
-
-		//template<typename T>
-		//inline constexpr variable& operator^(T) {
-		//	return this->hint<T>();
-		//}
-
-		//template<typename T>
-		//inline variable& hint() {
-		//	// Explicitly instantiate T
-		//	using instantiated = instantiate_type<T>;
-		//	static instantiated g{};
-		//	if (m_active) {
-		//		throw type_error("Cannot hint an initalized variable's type");
-		//	}
-		//	if (m_hint != nullptr) {
-		//		throw type_error("Cannot hint a variable's type more than once");
-		//	}
-		//	m_hint = &typeid(std::decay_t<T>);
-		//	return *this;
-		//}
 			
 	public: // Utility
 
@@ -740,7 +701,6 @@ namespace viper_::detail {
 			return m_owner->get_name();
 		}
 
-
 	private: // Helpers
 
 		inline void create() {
@@ -749,19 +709,8 @@ namespace viper_::detail {
 
 		inline void destroy() {
 			m_active = false;
-			m_hint = nullptr;
 			m_data.reset();
 		}
-
-		//inline void check_assignment_type(std::type_info const& new_type) {
-		//	if (m_active) {
-		//		if (m_internal_value->type() != new_type) {
-		//			throw type_error("Variable type was reassigned");
-		//		}
-		//	} else if (m_hint != nullptr && *m_hint != new_type) {
-		//		throw type_error("Variable type does not match hint type");
-		//	}
-		//}
 			
 	private: // Member Variables
 
@@ -811,7 +760,6 @@ namespace viper_::detail {
 		};
 
 		data_state m_data;
-		std::type_info const* m_hint;
 		variable_stack* m_owner; // Invariant: Never null
 
 		bool m_active;
