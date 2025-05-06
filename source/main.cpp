@@ -10,9 +10,7 @@ int main() {
 		print(f"bar says: param1 is {param1}, param2 is {param2}, param3 is {param3}");
 	};
 
-	"param1"_ = "original1";
-	"param2"_ = "original2";
-	"param3"_ = "original3";
+
 
 	//print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 	//
@@ -22,15 +20,21 @@ int main() {
 	//
 	//bar(2, 3, 4);
 
+	"param1"_ = "original1";
+	"param2"_ = "original2";
+	"param3"_ = "original3";
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
 	"param3"_ = 2131;
-	bar("param3"_, 78, 20);
-	//bar("param3"_, "param3"_ = 1, "param2"_ = 2);
+	bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
+	//(void)::viper_::detail::to_value("param1");
+	//(void)::viper_::detail::to_value("param2"_.get_value());
+	//(void)::viper_::detail::to_value("param3"_);
 
+	//bar("param3"_, "param3"_ = 1, "param2"_ = 2);
 	viper_::list my_list(3, "?", 4);
 
 	//viper_::detail::type_record_storage::global_context().dump_type_names();

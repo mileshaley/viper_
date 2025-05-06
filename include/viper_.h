@@ -439,43 +439,6 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
- * Collection Types                                                          *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_ {
-
-	class list {
-	public:
-		list()
-			: m_values()
-		{}
-		
-		template<typename... Ts>
-		list(Ts... elements)
-			: m_values()
-		{
-			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
-			(void)(sizeof(::viper_::detail::instantiate_type<Ts>), ...);
-
-			m_values.reserve(sizeof...(Ts));
-			(m_values.emplace_back(elements), ...);
-		}
-
-
-
-	private:
-		std::vector<detail::value> m_values;
-	}; // class list
-
-	class tuple {
-	public:
-
-	private:
-	}; // class tuple
-
-} // namespace viper_
-
-/*~-------------------------------------------------------------------------~*\
  * Variable Access Stamps                                                    *
 \*~-------------------------------------------------------------------------~*/
 
@@ -856,6 +819,65 @@ namespace viper_::literals {
 } // namespace viper_::literals
 
 /*~-------------------------------------------------------------------------~*\
+ * Collection Types                                                          *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+
+	class list {
+	public:
+		list()
+			: m_values()
+		{}
+		
+		/// TODO: Don't pass elements by value
+		template<typename... Ts>
+		list(Ts... elements)
+			: m_values()
+		{
+			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
+			(void)(sizeof(::viper_::detail::instantiate_type<Ts>), ...);
+
+			m_values.reserve(sizeof...(Ts));
+			(m_values.emplace_back(elements), ...);
+		}
+
+		
+
+	private:
+		std::vector<detail::value> m_values;
+	}; // class list
+
+	class tuple {
+	public:
+
+	private:
+	}; // class tuple
+
+} // namespace viper_
+
+/*~-------------------------------------------------------------------------~*\
+ * Value Access Helper                                                       *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	inline value to_value(value value) {
+		return value;
+	}
+
+	inline value to_value(variable const& variable) {
+		return variable.get_value();
+	}
+
+	template<typename T>
+	inline value to_value(T data) {
+		return value(data);
+	}
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Functions                                                                 *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1069,7 +1091,7 @@ namespace viper_::detail {
 		template<size_t Index>
 		inline void process_variable_argument(process_arguments_state& state, variable& argument) {
 			using argument_phase = process_arguments_state::argument_phase;
-			const auto keyword_matches_name = [&keyword = argument.get_name()](auto const& parameter) {
+			const auto keyword_matches_name = [&keyword = argument.get_name()](parameter const& parameter) {
 				return parameter.variable->get_name() == keyword;
 			};
 
