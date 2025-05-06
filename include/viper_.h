@@ -144,42 +144,51 @@ namespace viper_::detail {
 	static inline const std::string unknown_string_representation = "<?>";
 
 	template<typename T, class = void>
-	class has_to_string
+	class has_to_string 
+		: public std::false_type {};
+
+	template<typename T>
+	class has_to_string<T, std::void_t<decltype(std::to_string(std::declval<T>()))>>
+		: public std::true_type {};
+
+	template<typename T, class = void>
+	class string_convertible
 		: public std::false_type {
 	};
 
 	template<typename T>
-	class has_to_string<T, std::void_t<decltype(std::to_string(std::declval<T>()))>>
-		: public std::true_type {
-	};
+	class string_convertible<T, std::void_t<decltype(std::string(std::declval<T>()))>>
+		: public std::true_type {};
 
 	template<typename T>
 	class string_representation {
 	public:
 		static inline std::string get(T const& data) {
-			if constexpr (has_to_string<T>::value) {
+			if constexpr (string_convertible<T>::value) {
+				return data;
+			} else if constexpr (has_to_string<T>::value) {
 				return std::to_string(data);
 			} else {
-				return {};
+				return unknown_string_representation;
 			}
 		}
 	}; // class string_representation<T>
 
-	template<>
-	class string_representation<const char*> {
-	public:
-		static inline std::string get(const char* const& data) {
-			return std::string(data);
-		}
-	}; // class string_representation<cosnt char*>
-
-	template<>
-	class string_representation<std::string> {
-	public:
-		static inline std::string get(std::string const& data) {
-			return data;
-		}
-	}; // class string_representation<std::string>
+	//template<>
+	//class string_representation<const char*> {
+	//public:
+	//	static inline std::string get(const char* const& data) {
+	//		return std::string(data);
+	//	}
+	//}; // class string_representation<cosnt char*>
+	//
+	//template<>
+	//class string_representation<std::string> {
+	//public:
+	//	static inline std::string get(std::string const& data) {
+	//		return data;
+	//	}
+	//}; // class string_representation<std::string>
 
 } // namespace viper_::detail
 
@@ -348,6 +357,10 @@ namespace viper_::detail {
 			return m_data;
 		}
 
+		std::any& get_data_storage() {
+			return m_data;
+		}
+
 	private:
 		std::any m_data;
 		bool m_mutable;
@@ -423,6 +436,11 @@ namespace viper_::detail {
 		}
 
 	public: // Comparison
+		inline bool is_truthy() const {
+			/// TODO: This needs to actually get implemented
+			return m_data != nullptr;
+		}
+
 		inline bool is_same(value const& rhs) const {
 			return m_data == rhs.m_data;
 		}
@@ -989,6 +1007,14 @@ namespace viper_ {
 			}
 			m_values.emplace(m_values.begin() + real_index, detail::to_value(std::forward<T>(element)));
 		}
+
+		/// TODO: Remove
+		std::vector<detail::value> const& get_data() const {
+			return m_values;
+		}
+		std::vector<detail::value>& get_data() {
+			return m_values;
+		}
 		
 	public: // Dunder Methods
 
@@ -1026,9 +1052,15 @@ namespace viper_ {
 
 	class tuple {
 	public:
-
+		
 	private:
 	}; // class tuple
+
+	class dict {
+	public:
+		
+	private:
+	}; // class dict
 
 } // namespace viper_
 
@@ -1119,6 +1151,7 @@ namespace viper_::detail {
 						m_positional_catcher_index = static_cast<int>(i);
 						phase = keyword_args;
 						parameter.type = parameter_type::positional_catcher;
+						//parameter.default_value.assign(list());
 						return true;
 					} else if (parameter.unpack_count == 2) {
 						if (parameter.default_value.is_some()) {
@@ -1128,7 +1161,7 @@ namespace viper_::detail {
 						m_keyword_catcher_index = static_cast<int>(i);
 						phase = finished;
 						parameter.type = parameter_type::keyword_catcher;
-						parameter.default_value.assign(std::unordered_map<std::string, value>());
+						//parameter.default_value.assign(dict());
 						return true;
 					} else if (parameter.unpack_count >= 3) {
 						throw type_error("Cannot put more than two '*' on an argument");
@@ -1178,6 +1211,13 @@ namespace viper_::detail {
 			for (parameter& parameter : m_parameters) {
 				parameter.variable->push();
 				parameter.assigned_by_call = false;
+				// Catchers can be assigned to multiple times by appending so they need to already exist before we process args
+				if (parameter.type == parameter_type::positional_catcher) {
+					parameter.variable->top().direct_assign(list());
+				} else if (parameter.type == parameter_type::keyword_catcher) {
+					parameter.variable->top().direct_assign(dict());
+
+				}
 			}
 
 			// Declared as a lambda so it can be called in case process_arguments throws an error
@@ -1262,11 +1302,6 @@ namespace viper_::detail {
 						state.phase = argument_phase::keyword;
 						const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
 						if (matching_parameter != m_parameters.end()) {
-							/// TODO: Reconsider this because it doesn't actually match Python's behavior
-							// We don't count naming a positional parameter in the correct order as a keyword argument
-							//if (static_cast<size_t>(matching_parameter - m_parameters.begin()) == Index) {
-							//	state.phase = argument_phase::positional;
-							//}
 							mark_parameter_assigned(*matching_parameter);
 							matching_parameter->variable->top().direct_assign(assigned_value);
 						} else {
@@ -1282,8 +1317,9 @@ namespace viper_::detail {
 					const parameter_type current_parameter_type = m_parameters[Index].type;
 					if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
 						if (has_positional_catcher()) {
-							/// TODO: Append to end of keyword catcher tuple here
-							//m_parameters[m_positional_catcher_index].variable->top().get_value().
+							/// TODO: Append to end of positional catcher tuple here
+							list& positional_catcher = std::any_cast<list&>(m_parameters[m_positional_catcher_index].variable->top().get_value().data().get_data_storage());
+							positional_catcher.append(argument.get_value());
 						} else {
 							throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
 						}
@@ -1326,8 +1362,10 @@ namespace viper_::detail {
 				const parameter_type current_parameter_type = m_parameters[Index].type;
 				if (current_parameter_type != parameter_type::positional and current_parameter_type != parameter_type::positional_with_default) {
 					if (has_positional_catcher()) {
-						/// TODO: Append to end of keyword catcher tuple here
+						/// TODO: Append to end of positional catcher tuple here
 						//m_parameters[m_positional_catcher_index].variable->top().get_value().
+						list& positional_catcher = std::any_cast<list&>(m_parameters[m_positional_catcher_index].variable->top().get_value().data().get_data_storage());
+						positional_catcher.append(argument);
 					} else {
 						throw type_error("Too many positional arguments and function doesn't accept *positional arguments");
 					}
@@ -1486,16 +1524,6 @@ namespace viper_ {
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
- * Print Function                                                            *
-\*~-------------------------------------------------------------------------~*/
-
-namespace viper_ {
-	inline void print(std::string const& text) {
-		std::cout << text << std::endl;
-	}
-} // namespace viper_
-
-/*~-------------------------------------------------------------------------~*\
  * Underscore "Operator"                                                     *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1538,8 +1566,10 @@ namespace viper_ {
 #define VIPER_COLON
 
 #define VIPER_INTERNAL_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_DEF
 
-#define VIPER_DEF(Name) ; ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_DEF
+#define VIPER_INTERNAL_NO_CAPTURE_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + []([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_NO_CAPTURE_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_NO_CAPTURE_DEF
 
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
@@ -1553,7 +1583,6 @@ namespace viper_ {
 	using namespace viper_::literals;
 	using viper_::hint;
 	using viper_::type_error;
-	using viper_::print;
 
 	using viper_::True;
 	using viper_::False;
@@ -1569,11 +1598,39 @@ namespace viper_ {
 	#define elif VIPER_ELIF
 	#define except VIPER_EXCEPT
 	#define f VIPER_FORMAT
-	#define def VIPER_DEF
-
+	#define def_ VIPER_DEF
+	#define def VIPER_NO_CAPTURE_DEF
 	#define col VIPER_COLON
+	/// TODO: Add global keyword that works for variables like how f keyword works
 #endif // not defined(VIPER_NO_MACRO_POLLUTION)
 
+/*~-------------------------------------------------------------------------~*\
+ * Print Function                                                            *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_ {
+	inline def(print)(*"values"_, "sep"_ = " ", "end"_ = "\n", "flush"_ = False) {
+		list const& positional_catcher = std::any_cast<list&>("values"_->get_value().data().get_data_storage());
+		auto const& positional_arguments = positional_catcher.get_data();
+		const size_t end = positional_arguments.size() - 1;
+		
+		const std::string separator = detail::string_representation<detail::value>::get("sep"_->get_value());
+		const std::string end_token = detail::string_representation<detail::value>::get("end"_->get_value());
+		for (size_t i = 0; i < end; ++i) {
+			std::cout << detail::string_representation<detail::value>::get(positional_arguments[i]) << separator;
+		}
+		std::cout << detail::string_representation<detail::value>::get(positional_arguments[end]) << end_token;
+		if ("flush"_->get_value().is_truthy()) {
+			std::cout << std::flush;
+		}
+	};
+
+	//inline void print(std::string const& text) {
+	//	std::cout << text << std::endl;
+	//}
+} // namespace viper_
+
+using viper_::print;
 
 /*~-------------------------------------------------------------------------~*\
  * Upcoming Features                                                         *
