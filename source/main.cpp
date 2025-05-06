@@ -32,7 +32,8 @@ int main() {
 
 
 	viper_::list my_list(3, "?", 4);
-	viper_::detail::type_record_storage::global_context().dump_type_names();
+
+	//viper_::detail::type_record_storage::global_context().dump_type_names();
 	
 	//foo();
 	//

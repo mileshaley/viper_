@@ -505,10 +505,10 @@ namespace viper_::detail {
 	public: // Lifecycle
 		inline generic_variable_stack(std::string const& name = "__unnamed__")
 			// Invariant: there exists a minimum of 1 variable on a variable stack
-			: m_data(1)
+			: m_data(1, this)
 			, m_name(name)
-			, m_access_counter(0) {
-			m_data.back().set_owner(this);
+			, m_access_counter(0)
+		{
 		}
 
 		inline void pop() {
@@ -518,8 +518,7 @@ namespace viper_::detail {
 		}
 
 		inline Variable& push() {
-			Variable& new_variable = m_data.emplace_back();
-			new_variable.set_owner(this);
+			Variable& new_variable = m_data.emplace_back(this);
 			return new_variable;
 		}
 
@@ -531,7 +530,7 @@ namespace viper_::detail {
 			return m_data.back();
 		}
 
-		inline std::string const& name() const {
+		inline std::string const& get_name() const {
 			return m_name;
 		}
 
@@ -565,11 +564,10 @@ namespace viper_::detail {
 
 	class variable {
 	public: // Lifecycle
-
-		variable()
+		variable(variable_stack* owner)
 			: m_data()
 			, m_hint()
-			, m_owner(nullptr)
+			, m_owner(owner)
 			, m_active(false)
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
@@ -577,20 +575,20 @@ namespace viper_::detail {
 		{
 		}
 
-		variable(variable const& other)
+		variable(variable const& other, variable_stack* owner)
 			: m_data(other.m_data)
 			, m_hint(other.m_hint)
-			, m_owner(nullptr)
+			, m_owner(owner)
 			, m_active(other.m_active)
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
 			, m_previous_assignment_stamp(0) {
 		}
 
-		variable(variable&& other) noexcept
+		variable(variable&& other, variable_stack* owner) noexcept
 			: m_data(std::move(other.m_data))
 			, m_hint(std::exchange(other.m_hint, nullptr))
-			, m_owner(nullptr)
+			, m_owner(owner)
 			, m_active(std::exchange(other.m_active, false))
 			, m_unpack_count(0)
 			, m_previous_unpack_access_stamp(0)
@@ -598,10 +596,6 @@ namespace viper_::detail {
 		}
 
 		~variable() = default;
-
-		inline void set_owner(variable_stack* owner) {
-			m_owner = owner;
-		}
 
 		inline variable_stack* get_owner() {
 			return m_owner;
@@ -612,7 +606,7 @@ namespace viper_::detail {
 		// Rebind variable name to the value of another variable
 		inline variable& operator=(variable const& rhs) {
 			if (this == &rhs) { return *this; }
-			m_previous_assignment_stamp = m_owner->get_access_stamp();
+			m_previous_assignment_stamp = get_access_stamp();
 			//check_assignment_type(rhs.m_internal_value->type());
 			m_data.assign(rhs.get_value());
 			create();
@@ -622,7 +616,7 @@ namespace viper_::detail {
 		/// TODO: rhs has to be passed by value otherwise T will be innacurate when const. Find a fix
 		template<typename T>
 		inline variable& operator=(T rhs) {
-			m_previous_assignment_stamp = m_owner->get_access_stamp();
+			m_previous_assignment_stamp = get_access_stamp();
 			// Explicitly instantiate reflection for T 
 			VIPER_INTERNAL_INSTANTIATE_TYPE(T);
 			//check_assignment_type(typeid(std::decay_t<T>));
@@ -630,8 +624,6 @@ namespace viper_::detail {
 			create();
 			return *this;
 		}
-
-		//inline variable& operator=(value const& rhs) {}
 
 	public: // Access Operator
 
@@ -643,7 +635,7 @@ namespace viper_::detail {
 	public: // Unpacking Operator
 
 		inline variable& operator*() {
-			const auto current_access_stamp = m_owner->get_access_stamp();
+			const auto current_access_stamp = get_access_stamp();
 			if (m_unpack_count == 0) {
 				m_unpack_count = 1;
 			} else if (m_unpack_count == 1) {
@@ -696,7 +688,6 @@ namespace viper_::detail {
 		//	m_hint = &typeid(std::decay_t<T>);
 		//	return *this;
 		//}
-
 			
 	public: // Utility
 
@@ -705,6 +696,7 @@ namespace viper_::detail {
 			(void)steal_unpack_count();
 		}
 
+		/// TODO: Remove
 		inline size_t type_hash_code() const {
 			return m_data.get().data().type().hash_code();
 		}
@@ -739,12 +731,17 @@ namespace viper_::detail {
 		inline stamp::counter_t get_last_assignment_stamp() const {
 			return m_previous_assignment_stamp;
 		}
-			 
-	private: // Helpers
 
-		//inline stamp::counter_t get_access_stamp() {
-		//	return m_owner ? m_owner->get_access_stamp() : std::numeric_limits<stamp::counter_t>::max();
-		//}
+		inline stamp::counter_t get_access_stamp() const {
+			return m_owner->get_access_stamp();
+		}
+		
+		inline std::string const& get_name() const {
+			return m_owner->get_name();
+		}
+
+
+	private: // Helpers
 
 		inline void create() {
 			m_active = true;
@@ -765,7 +762,6 @@ namespace viper_::detail {
 		//		throw type_error("Variable type does not match hint type");
 		//	}
 		//}
-
 			
 	private: // Member Variables
 
@@ -815,9 +811,8 @@ namespace viper_::detail {
 		};
 
 		data_state m_data;
-
 		std::type_info const* m_hint;
-		variable_stack* m_owner;
+		variable_stack* m_owner; // Invariant: Never null
 
 		bool m_active;
 		uint8_t m_unpack_count;
@@ -1088,7 +1083,7 @@ namespace viper_::detail {
 						and parameter.type != parameter_type::positional_catcher
 						and parameter.type != parameter_type::keyword_catcher
 					) {
-						throw type_error(std::format("Required parameter {} not passed in call to function", parameter.variable->name()));
+						throw type_error(std::format("Required parameter {} not passed in call to function", parameter.variable->get_name()));
 					} else {
 						parameter.variable->top().direct_assign(parameter.default_value);
 					}
@@ -1119,21 +1114,21 @@ namespace viper_::detail {
 
 		inline void mark_parameter_assigned(parameter& parameter) {
 			if (std::exchange(parameter.assigned_by_call, true)) {
-				throw type_error(std::format("Parameter {} already assigned in call to function", parameter.variable->name()));
+				throw type_error(std::format("Parameter {} already assigned in call to function", parameter.variable->get_name()));
 			}
 		}
 
 		template<size_t Index>
 		inline void process_variable_argument(process_arguments_state& state, variable& argument) {
 			using argument_phase = process_arguments_state::argument_phase;
-			const auto keyword_matches_name = [&keyword = argument.get_owner()->name()](auto const& parameter) {
-				return parameter.variable->name() == keyword;
+			const auto keyword_matches_name = [&keyword = argument.get_name()](auto const& parameter) {
+				return parameter.variable->get_name() == keyword;
 			};
 
 			if (state.phase == argument_phase::positional) {
 				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
-					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {
+					if (stamp::is_newer(argument->get_access_stamp(), argument.get_last_assignment_stamp())) {
 						argument->direct_assign(assigned_value);
 						parameter& parameter = m_parameters[Index];
 						mark_parameter_assigned(parameter);
@@ -1176,7 +1171,7 @@ namespace viper_::detail {
 			} else /* state.phase == argument_phase::keyword */ {
 				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
-					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {
+					if (stamp::is_newer(argument->get_access_stamp(), argument.get_last_assignment_stamp())) {
 						argument->direct_assign(assigned_value);
 						throw type_error("Cannot place positional arguments after keyword arguments");
 					} else {
