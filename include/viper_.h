@@ -436,7 +436,7 @@ namespace viper_::detail::stamp {
 	// their difference isn't more than 2^(size in bits - 1)
 	static inline constexpr bool is_newer(counter_t current, counter_t previous) {
 		// View unsigned difference as signed, turning the high bit into the sign bit
-		// This means: (current < previous) => negative, (current > previous) => positive
+		// This means: (current < previous) -> negative, (current > previous) -> positive
 		return static_cast<std::make_signed_t<counter_t>>(current - previous) > 0;
 	}
 } // namespace viper_::detail::stamp
@@ -678,12 +678,16 @@ namespace viper_::detail {
 			return m_data.get();
 		}
 
+		inline uint8_t steal_unpack_count() {
+			return std::exchange(m_unpack_count, uint8_t(0));
+		}
+
 		inline value steal_last_assignment() {
 			return m_data.steal_last_assignment();
 		}
 
-		inline uint8_t steal_unpack_count() {
-			return std::exchange(m_unpack_count, uint8_t(0));
+		inline stamp::counter_t get_last_assignment_stamp() const {
+			return m_previous_assignment_stamp;
 		}
 			 
 	private: // Helpers
@@ -930,7 +934,7 @@ namespace viper_::detail {
 				}
 			}
 
-			/// TODO: Provide more specifics in exception including parameter name and index
+			/// TODO: Provide more specifics in exceptions including parameter name and index
 			for (size_t i = 0; i < parameters.size(); ++i) {
 				parameter& parameter = m_parameters[i];
 
@@ -1078,24 +1082,31 @@ namespace viper_::detail {
 
 			if (state.phase == argument_phase::positional) {
 				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
-				value assigned_value = argument.steal_last_assignment();
+				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
-					state.phase = argument_phase::keyword;
-					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
-					if (matching_parameter != m_parameters.end()) {
-						/// TODO: Reconsider this because it doesn't actually match Python's behavior
-						// We don't count naming a positional parameter in the correct order as a keyword argument
-						if (static_cast<size_t>(matching_parameter - m_parameters.begin()) == Index) {
-							state.phase = argument_phase::positional;
-						}
-						mark_parameter_assigned(*matching_parameter);
-						matching_parameter->variable->top().direct_assign(assigned_value);
+					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {
+						argument->direct_assign(assigned_value);
+						parameter& parameter = m_parameters[Index];
+						mark_parameter_assigned(parameter);
+						parameter.variable->top().direct_assign(argument.get_value());
 					} else {
-						if (has_keyword_catcher()) {
-							/// TODO: Add key to keyword catcher dict here
-							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+						state.phase = argument_phase::keyword;
+						const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
+						if (matching_parameter != m_parameters.end()) {
+							/// TODO: Reconsider this because it doesn't actually match Python's behavior
+							// We don't count naming a positional parameter in the correct order as a keyword argument
+							//if (static_cast<size_t>(matching_parameter - m_parameters.begin()) == Index) {
+							//	state.phase = argument_phase::positional;
+							//}
+							mark_parameter_assigned(*matching_parameter);
+							matching_parameter->variable->top().direct_assign(assigned_value);
 						} else {
-							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+							if (has_keyword_catcher()) {
+								/// TODO: Add key to keyword catcher dict here
+								//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+							} else {
+								throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+							}
 						}
 					}
 				} else /* assigned_value.is_none() */ {
@@ -1115,18 +1126,23 @@ namespace viper_::detail {
 				}
 			} else /* state.phase == argument_phase::keyword */ {
 				/// TODO: Factor in assignment counter checking here to fix assignment ambiguity
-				value assigned_value = argument.steal_last_assignment();
+				const value assigned_value = argument.steal_last_assignment();
 				if (assigned_value.is_some()) {
-					const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
-					if (matching_parameter != m_parameters.end()) {
-						mark_parameter_assigned(*matching_parameter);
-						matching_parameter->variable->top().direct_assign(assigned_value);
+					if (stamp::is_newer(argument->get_owner()->get_access_stamp(), argument.get_last_assignment_stamp())) {
+						argument->direct_assign(assigned_value);
+						throw type_error("Cannot place positional arguments after keyword arguments");
 					} else {
-						if (has_keyword_catcher()) {
-							/// TODO: Add key to keyword catcher dict here
-							//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+						const auto matching_parameter = std::find_if(m_parameters.begin(), m_parameters.end(), keyword_matches_name);
+						if (matching_parameter != m_parameters.end()) {
+							mark_parameter_assigned(*matching_parameter);
+							matching_parameter->variable->top().direct_assign(assigned_value);
 						} else {
-							throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+							if (has_keyword_catcher()) {
+								/// TODO: Add key to keyword catcher dict here
+								//m_parameters[m_keyword_catcher_index].variable->top().get_value().
+							} else {
+								throw type_error("Keyword argument does not name any parameters and function doesn't accept **keyword arguments");
+							}
 						}
 					}
 				} else /* assigned_value.is_none() */ {

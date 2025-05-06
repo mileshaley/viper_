@@ -25,9 +25,12 @@ int main() {
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 
-	bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
+	"param3"_ = 2131;
+	//bar("param3"_, 78, 20);
+	bar("param3"_, "param3"_ = 1, "param2"_ = 2);
 
 	print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
+
 
 	//foo();
 	//
@@ -47,6 +50,15 @@ int main() {
 
 	/// Unpacking
 	"first"_, *"all_middle"_, "last"_ = (1, 2, 3, 4, 5);
+
+
+	/// TODO: This case breaks because the parameters are all evaluated in order first then the function is called.
+	/// Currently the only way to fix this, as far as I can tell, is to make the value syntax state ever growing like with a vector.
+	/// Although maybe it just needs to be 2 extra assignments instead of 1 because I can't see a valid case where you could write a variable's name at all 
+	///		in a call to a function more than 2 times since you can only assign once within the parenthesis
+	/// Another way to fix could be to make operator= of variable return a proxy with a pointer to the variable and some context about access stamps and value
+	//"param3"_ = 2131;
+	//bar("param3"_, "param3"_ = 1, "param2"_ = 2);
 
 	return 0;
 }
