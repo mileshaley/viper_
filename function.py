@@ -45,14 +45,19 @@ def main() -> None:
 
     a = ["one", "two", "three"]
     print(a.__len__())
+
+    b = list(2, 2)
+    print(f"{b=}")
     #a = None
 
     #print(a.pop(-4))
     #print(a.pop(-1))
 
-    print("plung ", a.index("two", 2, 1))
-
+    print("plung ", a.index("two", 1, -1))
+    #a.__repr__
+    print(a)
     print("--"*20)
+    g = dict()
 
     def baz(a, b, c, d, *e, w, x=2, y):
         print(f"{a=}, {b=}, {c=}, {d=}, {e=}, {w=}, {x=}, {y=} \n{'-'*10}\n")

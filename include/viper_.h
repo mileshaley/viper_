@@ -141,6 +141,8 @@ namespace viper_::detail {
 
 namespace viper_::detail {
 
+	static inline const std::string unknown_string_representation = "<?>";
+
 	template<typename T, class = void>
 	class has_to_string
 		: public std::false_type {
@@ -469,6 +471,27 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
+ * Value to String Conversion                                                *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	template<>
+	class string_representation<value> {
+	public:
+		static inline std::string get(value const& data) {
+			if (data.is_none()) {
+				return "None";
+			}
+			type_record const* record = type_record_storage::global_context().find(data.data().get_data_storage().type().hash_code());
+			if (record == nullptr) {
+				return unknown_string_representation;
+			}
+			return record->get_string_data(data.data().get_data_storage());
+		}
+	}; // class string_representation<cosnt char*>
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Variable Access Stamps                                                    *
 \*~-------------------------------------------------------------------------~*/
 
@@ -650,11 +673,6 @@ namespace viper_::detail {
 			(void)steal_unpack_count();
 		}
 
-		/// TODO: Remove
-		inline size_t type_hash_code() const {
-			return m_data.get().data().type().hash_code();
-		}
-
 		inline variable& direct_assign(value const& new_value) {
 			m_data.assign(new_value);
 			accept_last_assignment();
@@ -796,20 +814,14 @@ namespace viper_::detail {
 			return stack.top();
 		}
 
-		inline decltype(auto) find(std::string const& name) {
-			return m_data.find(name);
+		inline variable_stack* find(std::string const& name) {
+			const auto it = m_data.find(name);
+			return it != m_data.end() ? &(it->second) : nullptr;
 		}
 
-		inline decltype(auto) find(std::string const& name) const {
-			return m_data.find(name);
-		}
-
-		inline decltype(auto) end() {
-			return m_data.end();
-		}
-
-		inline decltype(auto) end() const {
-			return m_data.end();
+		inline variable_stack const* find(std::string const& name) const {
+			const auto it = m_data.find(name);
+			return it != m_data.end() ? &(it->second) : nullptr;
 		}
 
 	private:
@@ -887,12 +899,27 @@ namespace viper_ {
 		list(Ts&&... elements)
 			: m_values()
 		{
-			// Expanded from VIPER_INTERNAL_INSTANTIATE_TYPE
 			(void)(sizeof(::viper_::detail::instantiate_type<std::decay_t<Ts>>), ...);
 
 			m_values.reserve(sizeof...(Ts));
 			(m_values.emplace_back(detail::to_value(std::forward<Ts>(elements))), ...);
 		}
+
+		list(list& other)
+			: m_values(other.m_values) {
+		}
+
+		list(list const& other)
+			: m_values(other.m_values)
+		{
+		}
+
+		list(list&& other) noexcept
+			: m_values(std::move(other.m_values))
+		{
+		}
+
+	public: // Interface
 
 		detail::value pop(in_index_t index = -1) {
 			const size_t real_index = fix_index(index);
@@ -942,10 +969,46 @@ namespace viper_ {
 			return -1;
 		}
 
+		void clear() {
+			m_values.clear();
+		}
+
+		void extend(list const& iterable) {
+			m_values.insert(m_values.end(), iterable.m_values.begin(), iterable.m_values.end());
+		}
+
+		void reverse() {
+			std::reverse(m_values.begin(), m_values.end());
+		}
+
+		template<typename T>
+		void insert(in_index_t index, T&& element) {
+			size_t real_index = fix_index(index);
+			if (not in_range(index)) {
+				throw index_error("insert index out of range");
+			}
+			m_values.emplace(m_values.begin() + real_index, detail::to_value(std::forward<T>(element)));
+		}
 		
 	public: // Dunder Methods
+
 		size_t __len__() const {
 			return m_values.size();
+		}
+
+		std::string __str__() const {
+			return __repr__();
+		}
+
+		std::string __repr__() const {
+			std::string out = "[";
+			for (size_t i = 0; i < m_values.size(); ++i) {
+				out += detail::string_representation<detail::value>::get(m_values[i]);
+				if (i + 1 != m_values.size()) {
+					out += ", ";
+				}
+			}
+			return out += "]";
 		}
 
 	private: // Helper Methods
@@ -1378,11 +1441,12 @@ namespace viper_::detail {
 
 				std::string data_string = "";
 
-				auto var_it = variables.find(out.substr(begin_format + 1llu, variable_length));
-				if (var_it != variables.end()) {
-					type_record const* type = types.find(var_it->second.top().type_hash_code());
-					if (type) {
-						data_string = type->get_string_data(var_it->second.top().get_value().data().get_data_storage());
+				if (variable_stack const* variable = variables.find(out.substr(begin_format + 1llu, variable_length))) {
+					value const& variable_value = variable->top().get_value();
+					if (variable_value.is_some()) {
+						if (type_record const* type = types.find(variable_value.data().type().hash_code())) {
+							data_string = type->get_string_data(variable->top().get_value().data().get_data_storage());
+						}
 					}
 				}
 
@@ -1490,10 +1554,12 @@ namespace viper_ {
 	using viper_::hint;
 	using viper_::type_error;
 	using viper_::print;
-	//using def = viper_::detail::function;
 
 	using viper_::True;
 	using viper_::False;
+
+	using viper_::list;
+	using viper_::tuple;
 #endif // not defined(VIPER_NO_NAMESPACE_POLLUTION)
 
 #if not defined(VIPER_NO_MACRO_POLLUTION)

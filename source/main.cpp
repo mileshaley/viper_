@@ -37,6 +37,8 @@ int main() {
 	//bar("param3"_, "param3"_ = 1, "param2"_ = 2);
 	viper_::list my_list(3, "?", 4, "hello");
 
+	"L"_ = list("hello", "param3"_, 3, "hi");
+
 	std::cout << my_list.index(4) << std::endl;
 
 	//viper_::detail::type_record_storage::global_context().dump_type_names();
