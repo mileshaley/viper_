@@ -18,45 +18,6 @@
 #include <format>
 
 /*~-------------------------------------------------------------------------~*\
- * Macros                                                                    *
-\*~-------------------------------------------------------------------------~*/
-
-#define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
-
-#define VIPER_IN :
-#define VIPER_ELIF else if
-#define VIPER_EXCEPT catch
-#define VIPER_FORMAT (::viper_::format_string)
-#define VIPER_COLON
-
-#define VIPER_INTERNAL_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
-#define VIPER_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_DEF
-
-#define VIPER_INTERNAL_NO_CAPTURE_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + []([[maybe_unused]] ::viper_::detail::function& __function__)
-#define VIPER_NO_CAPTURE_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_NO_CAPTURE_DEF
-
-/*~-------------------------------------------------------------------------~*\
- * Preprocessor Control                                                      *
-\*~-------------------------------------------------------------------------~*/
-
-// Before including this file you may choose to do any combination of the following:
-//     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution with short identifiers
-//     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _ or f)
-
-#if not defined(VIPER_NO_MACRO_POLLUTION)
-#define _ _VIPER_UNDERSCORE
-
-#define in VIPER_IN
-#define elif VIPER_ELIF
-#define except VIPER_EXCEPT
-#define f VIPER_FORMAT
-#define def_ VIPER_DEF
-#define def VIPER_NO_CAPTURE_DEF
-#define col VIPER_COLON
-/// TODO: Add 'global' keyword that works for variables like how f keyword works
-#endif // not defined(VIPER_NO_MACRO_POLLUTION)
-
-/*~-------------------------------------------------------------------------~*\
  * Internal Macros                                                           *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1562,6 +1523,23 @@ namespace viper_ {
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
+ * Global Variables                                                          *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class global {
+	public:
+		inline global(variable& variable)
+			: m_variable(&variable)
+		{
+		}
+
+	private:
+		variable* m_variable;
+	}; // class global
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Underscore "Operator"                                                     *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1592,6 +1570,59 @@ namespace viper_ {
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
+ * Macros                                                                    *
+\*~-------------------------------------------------------------------------~*/
+
+#define VIPER_HINT(Type) ^ ::viper_::hint<Type>()
+
+#define VIPER_IN :
+#define VIPER_ELIF else if
+#define VIPER_EXCEPT catch
+#define VIPER_FORMAT (::viper_::format_string)
+#define VIPER_COLON
+
+#define VIPER_INTERNAL_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + [&]([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_DEF
+
+#define VIPER_INTERNAL_NO_CAPTURE_DEF(...) ::std::initializer_list<std::reference_wrapper<::viper_::detail::variable>>{__VA_ARGS__} + []([[maybe_unused]] ::viper_::detail::function& __function__)
+#define VIPER_NO_CAPTURE_DEF(Name) ::viper_::detail::function Name = ::viper_::detail::function_builder(#Name) + VIPER_INTERNAL_NO_CAPTURE_DEF
+
+#define VIPER_GLOBAL (::viper_::detail::global)
+
+/*~-------------------------------------------------------------------------~*\
+ * Preprocessor Control                                                      *
+\*~-------------------------------------------------------------------------~*/
+
+// Before including this file you may choose to do any combination of the following:
+//     define VIPER_NO_NAMESPACE_POLLUTION to avoid global namespace pollution with short identifiers
+//     define VIPER_NO_MACRO_POLLUTION to avoid global macro pollution (for macros like _ or f)
+
+#if not defined(VIPER_NO_MACRO_POLLUTION)
+	#define _ _VIPER_UNDERSCORE
+	
+	#define in VIPER_IN
+	#define elif VIPER_ELIF
+	#define except VIPER_EXCEPT
+	#define f VIPER_FORMAT
+	#define def_ VIPER_DEF
+	#define def VIPER_NO_CAPTURE_DEF
+	#define col VIPER_COLON
+	/// TODO: Add 'global' keyword that works for variables like how f keyword works
+	#define global VIPER_GLOBAL
+#endif // not defined(VIPER_NO_MACRO_POLLUTION)
+
+#if not defined(VIPER_NO_NAMESPACE_POLLUTION)
+	using viper_::hint;
+	using viper_::type_error;
+
+	using viper_::True;
+	using viper_::False;
+
+	using viper_::list;
+	using viper_::tuple;
+#endif // not defined(VIPER_NO_NAMESPACE_POLLUTION)
+
+/*~-------------------------------------------------------------------------~*\
  * Print Function                                                            *
 \*~-------------------------------------------------------------------------~*/
 
@@ -1600,7 +1631,7 @@ namespace viper_ {
 		list const& positional_catcher = std::any_cast<list&>("values"_->get_value().data().get_data_storage());
 		auto const& positional_arguments = positional_catcher.get_data();
 		const size_t end = positional_arguments.size() - 1;
-		
+
 		const std::string separator = detail::string_representation<detail::value>::get("sep"_->get_value());
 		const std::string end_token = detail::string_representation<detail::value>::get("end"_->get_value());
 		for (size_t i = 0; i < end; ++i) {
@@ -1613,22 +1644,12 @@ namespace viper_ {
 	};
 } // namespace viper_
 
-
 /*~-------------------------------------------------------------------------~*\
- * Type and Value Aliases                                                    *
+ * Preprocessor Control for Builtins                                         *
 \*~-------------------------------------------------------------------------~*/
 
 #if not defined(VIPER_NO_NAMESPACE_POLLUTION)
 	using viper_::print;
-
-	using viper_::hint;
-	using viper_::type_error;
-
-	using viper_::True;
-	using viper_::False;
-
-	using viper_::list;
-	using viper_::tuple;
 #endif // not defined(VIPER_NO_NAMESPACE_POLLUTION)
 
 /*~-------------------------------------------------------------------------~*\
