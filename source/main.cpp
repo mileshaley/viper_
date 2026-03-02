@@ -1,17 +1,38 @@
 #include "viper_.h"
 
+// Doesn't work, capture needs to be local
+//const auto hello = [&]() {};
+
+class blass {
+public:
+	def(beep)("param1"_ = "Hello", "param2"_ = "World!") {
+		//print(f"foo says: param1 is {param1}, param2 is {param2}");
+	};
+
+	int data;
+	void t() {
+
+	}
+};
+
 int main() {
 	
 	def(foo)("param1"_ = "Hello", "param2"_ = "World!") {
-		//print(f"foo says: param1 is {param1}, param2 is {param2}");
+		print(f"foo says: param1 is {param1}, param2 is {param2}");
+	};
+
+	"viper"_ = "awesome";
+	print(f"This API is {viper}!");
+	// > This API is awesome!
+
+	def(x_is_y)("x"_ = "viper", "param2"_ = "World!") {
+		print(f"foo says: param1 is {param1}, param2 is {param2}");
 	};
 
 	def (bar)("param1"_, "param2"_ = true, "param3"_ = 2) {
 		//print(f"bar says: param1 is {param1}, param2 is {param2}, param3 is {param3}");
 	};
-
-
-
+	
 	//print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");
 	//
 	//bar(2);
@@ -30,6 +51,8 @@ int main() {
 	print("hi");
 
 	"param3"_ = 2131;
+
+	//"param4"_();
 	//bar("param3"_ = 3, "param1"_ = 1, "param2"_ = 2);
 
 	//print(f"param1 is {param1}, param2 is {param2}, param3 is {param3}");

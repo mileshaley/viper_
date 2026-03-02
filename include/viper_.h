@@ -5,7 +5,7 @@
 \*~-------------------------------------------------------------------------~*/
 
 #include <stdexcept>
-#include <stdint.h>
+#include <cstdint>
 #include <utility>
 #include <iostream>
 #include <memory>
@@ -16,6 +16,7 @@
 #include <functional>
 #include <list>
 #include <format>
+#include <string_view>
 
 /*~-------------------------------------------------------------------------~*\
  * Internal Macros                                                           *
@@ -83,7 +84,7 @@ namespace viper_ {
 		explicit index_error(const char* message)
 			: detail::exception(message) 
 		{}
-	};
+	}; // class index_error
 
 	class value_error : public detail::exception {
 	public:
@@ -93,7 +94,17 @@ namespace viper_ {
 		explicit value_error(const char* message)
 			: detail::exception(message) {
 		}
-	};
+	}; // class value_error
+
+	class attribute_error : public detail::exception {
+	public:
+		explicit attribute_error(std::string const& message)
+			: detail::exception(message) {
+		}
+		explicit attribute_error(const char* message)
+			: detail::exception(message) {
+		}
+	}; // class attribute_error
 } // namespace viper_
 
 /*~-------------------------------------------------------------------------~*\
@@ -121,6 +132,9 @@ namespace viper_::detail {
 				} catch (value_error const& error) {
 					std::cerr << "ValueError: " << error.what() << std::endl;
 					std::exit(3);
+				} catch (attribute_error const& error) {
+					std::cerr << "AttributeError: " << error.what() << std::endl;
+					std::exit(3);
 				}
 			}
 			std::abort();
@@ -135,15 +149,176 @@ namespace viper_::detail {
 
 } // namespace viper_::detail
 
+
+/*~-------------------------------------------------------------------------~*\
+ * Type                                                                      *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class type {
+	public:
+		
+		type()
+			: m_name()
+			, m_cpp_type(nullptr)
+		{
+		}
+
+	private:
+		std::string m_name;
+		const std::type_info* m_cpp_type;
+
+	}; // class type
+
+} // namespace viper_::detail 
+
+/*~-------------------------------------------------------------------------~*\
+ * Viper Runtime                                                             *
+\*~-------------------------------------------------------------------------~*/
+
+/// TODO: Implement. We will need to figure out how to avoid circular dependencies with this one
+///		since it will need to hold the instances of variable and type storages at the least
+namespace viper_::detail {
+	class runtime {
+	public:
+		runtime() {
+
+		}
+	private:
+
+	}; // class runtime
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Attribute Table                                                           *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	
+	class attribute_table {
+	public:
+		attribute_table()
+			: m_offset_map()
+		{
+
+		}
+
+		void add_attribute(std::string const& name, size_t offset) {
+			const auto [it, success] = m_offset_map.try_emplace(name, offset);
+		}
+
+		size_t get_offset(std::string const& name) {
+			return m_offset_map.at(name);
+		}
+
+	private:
+		std::unordered_map<std::string, size_t> m_offset_map;
+	}; // class attribute_table
+} // namespace viper_::detail
+
 /*~-------------------------------------------------------------------------~*\
  * Object Class                                                              *
 \*~-------------------------------------------------------------------------~*/
 
-namespace viper_ {
+namespace viper_::detail {
+	// "Base class" of all data in viper_. 
+	// We hold real references to objects and use non-C++ polymorphism to represent polymorphic data
 	class object {
+	public: // Lifecycle
+		/// TODO: Remove
+		object()
+			: m_data(nullptr)
+			, m_attributes(nullptr)
+		{}
 
-	};
-} // namespace viper_
+		/// TODO: Remove/fix
+		object([[maybe_unused]] object const& other)
+			: m_data(nullptr)
+			, m_attributes(nullptr) 				
+		{}
+
+		/// TODO: Remove/fix
+		object([[maybe_unused]] object&& other) noexcept
+			: m_data(nullptr)
+			, m_attributes(nullptr) 
+		{}
+
+		object(size_t data_size, attribute_table* attributes)
+			: m_data(std::make_unique<std::byte[]>(data_size))
+			, m_attributes(attributes)
+		{
+
+		}
+
+		static attribute_table const& base_attributes() {
+			static bool initialized = false;
+			static attribute_table attributes{};
+			if (initialized) { return attributes; }
+			initialized = true;
+
+			attributes.add_attribute("__init__", 0);
+			attributes.add_attribute("__str__", 0);
+
+
+			return attributes;
+		}
+
+		attribute_table& attributes() {
+			return *m_attributes;
+		}
+
+		attribute_table const& attributes() const {
+			return *m_attributes;
+		}
+
+		std::byte* at_offset(size_t offset) {
+			return m_data.get() + offset;
+		}
+		
+	private:
+		std::unique_ptr<std::byte[]> m_data;
+		attribute_table* m_attributes;
+	}; // class object
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * C++ Data Storage Class                                                    *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class cpp_object {
+	public: // Lifecycle
+		cpp_object()
+		{}
+
+	private:
+	}; // class cpp_object
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
+ * Integer Class                                                             *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	/// TODO: Implement growable integer buffer
+	class integer {
+	public: // Lifecycle
+		integer(int64_t number)
+			: m_data(number)
+		{}
+		
+		int64_t get() const {
+			return m_data;
+		}
+		void set(int64_t number) {
+			m_data = number;
+		}
+
+		private:
+			int64_t m_data;
+	}; // class cpp_object
+} // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
  * String Representation of Data                                             *
@@ -163,8 +338,8 @@ namespace viper_::detail {
 
 	template<typename T, class = void>
 	class string_convertible
-		: public std::false_type {
-	};
+		: public std::false_type {};
+
 	template<typename T>
 	class string_convertible<T, std::void_t<decltype(std::string(std::declval<T>()))>>
 		: public std::true_type {};
@@ -236,7 +411,7 @@ namespace viper_::detail {
 
 } //namespace viper_::detail
 
-/*~-------------------------------------------------------------------------~*\
+/*~-------------------------------------------------------------------------~*\yc*
  * Type Record Storage                                                       *
 \*~-------------------------------------------------------------------------~*/
 
@@ -369,9 +544,9 @@ namespace viper_::detail {
 
 namespace viper_::detail {
 
+	// Shared reference to a piece of data
 	class value {
 	public: // Lifecycle
-
 		inline value()
 			: m_data(nullptr)
 		{
@@ -402,6 +577,11 @@ namespace viper_::detail {
 		{
 		}
 
+		inline value(object&& object)
+			: m_data(std::make_shared<value_data>(std::any(std::move(object)), true))
+		{
+		}
+
 		inline void reset() {
 			m_data.reset();
 		}
@@ -417,6 +597,7 @@ namespace viper_::detail {
 
 		value& operator=(value const& rhs) {
 			m_data = rhs.m_data;
+			return *this;
 		}
 
 
@@ -431,6 +612,11 @@ namespace viper_::detail {
 		}
 
 	public: // Comparison
+		inline bool holds_object() const {
+			/// TODO: This needs to actually get implemented
+			return is_some() and false;
+		}
+
 		inline bool is_truthy() const {
 			/// TODO: This needs to actually get implemented
 			return m_data != nullptr;
@@ -530,7 +716,7 @@ namespace viper_::detail {
 	// It can only be used with type variable and should only ever be referred to as variable_stack
 	template<typename Variable = variable>
 	class generic_variable_stack {
-		static_assert(std::is_same_v<Variable, variable>, "generic_variable_stack only should be used with variable");
+		static_assert(std::is_same_v<Variable, variable>, "generic_variable_stack should only be used with variable");
 	public: // Lifecycle
 		inline generic_variable_stack(std::string const& name = "__unnamed__")
 			// Invariant: there exists a minimum of 1 variable on a variable stack
@@ -586,6 +772,44 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
+ * Attribute Proxy                                                           *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+	class attribute_proxy {
+	public:
+		attribute_proxy(value& value)
+			: m_value(&value)
+		{
+		}
+
+		attribute_proxy operator()(std::string_view attribute_name) {
+			if (m_value->is_none()) {
+				throw attribute_error(std::format("'NoneType' object has no attribute '{}'", attribute_name));
+			}
+			if (not m_value->holds_object()) {
+				throw attribute_error("C++ objects have no viper_ attributes");
+			}
+
+			object& data = std::any_cast<object&>(m_value->data().get_data_storage());
+			try {
+				std::byte* raw_data = data.at_offset(data.attributes().get_offset(std::string(attribute_name)));
+				/// TODO: return the next attribute proxy here
+				(void)raw_data;
+			} catch ([[maybe_unused]] std::out_of_range const& exception) {
+				/// TODO: Make this use actual object type name instead of 'object'
+				throw attribute_error(std::format("'object' object has no attribute '{}'", attribute_name));
+			}
+
+			/// TODO: This is very wrong, fix it
+			return *m_value;
+		}
+	private:
+		value* m_value;
+	}; // class proxy
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Variables                                                                 *
 \*~-------------------------------------------------------------------------~*/
 
@@ -623,8 +847,12 @@ namespace viper_::detail {
 
 		~variable() = default;
 
-		inline variable_stack* get_owner() {
-			return m_owner;
+		inline variable_stack& get_owner() {
+			return *m_owner;
+		}
+
+		attribute_proxy operator()(std::string_view attribute_name) {
+			return attribute_proxy(get_value())(attribute_name);
 		}
 
 	public: // Assignment Operators
@@ -899,12 +1127,27 @@ namespace viper_::detail {
 } // namespace viper_::detail
 
 /*~-------------------------------------------------------------------------~*\
+ * User Defined Classes                                                      *
+\*~-------------------------------------------------------------------------~*/
+
+namespace viper_::detail {
+
+	class custom_class {
+	public:
+		
+	private:
+
+	}; // class custom_class
+
+} // namespace viper_::detail
+
+/*~-------------------------------------------------------------------------~*\
  * Collection Types                                                          *
 \*~-------------------------------------------------------------------------~*/
 
 namespace viper_ {
 
-	class list {
+	class list : public detail::object {
 		using in_index_t = std::int64_t;
 		using out_index_t = std::int64_t;
 	public: // Lifecycle
@@ -1097,12 +1340,13 @@ namespace viper_::detail {
 	public: // Lifecycle
 		using callable_type = std::function<value(function&)>;
 
-		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable)
+		inline function(std::string&& name, std::vector<variable*> const& parameters, callable_type&& callable, bool is_class_definition_body)
 			: m_name(move(name))
 			, m_parameters()
 			, m_callable(move(callable))
 			, m_positional_catcher_index(-1)
 			, m_keyword_catcher_index(-1)
+			, m_class_definition_body(is_class_definition_body)
 		{
 			enum parameter_phase : int {
 				positional = 0,
@@ -1118,7 +1362,7 @@ namespace viper_::detail {
 			// exceptions can safely be thrown and they won't break variable states
 			for (variable* parameter : parameters) {
 				m_parameters.push_back({
-					parameter->get_owner(),
+					&parameter->get_owner(),
 					parameter->steal_last_assignment(),
 					parameter_type::positional,
 					parameter->steal_unpack_count(),
@@ -1401,6 +1645,7 @@ namespace viper_::detail {
 
 		int m_positional_catcher_index;
 		int m_keyword_catcher_index;
+		bool m_class_definition_body;
 	}; // class function
 } // namespace viper_::detail
 
@@ -1412,9 +1657,10 @@ namespace viper_::detail {
 	// Helper class used in making a complete function object within the def macro
 	class function_builder {
 	public:
-		inline function_builder(const char* name)
+		inline function_builder(const char* name, bool is_class_definition_body = false)
 			: m_name(name)
 			, m_parameters()
+			, m_class_definition_body(is_class_definition_body)
 		{}
 
 	private: // Helper Traits
@@ -1423,7 +1669,8 @@ namespace viper_::detail {
 		template<class Callable>
 		struct returns_void<Callable, std::enable_if_t<std::is_void_v<std::invoke_result_t<Callable, function>>>> : std::true_type {};
 
-	public:
+	public: // Syntax used by macros
+		// Called first, copy this function builder with added parameter list
 		inline function_builder operator+(std::initializer_list<std::reference_wrapper<variable>> parameters) {
 			m_parameters.clear(); // Just in case
 			m_parameters.reserve(parameters.size());
@@ -1433,20 +1680,27 @@ namespace viper_::detail {
 			return *this;
 		}
 
+		// Called second, create a function object using existing data and a callable object
 		template<class Callable>
 		inline constexpr function operator+(Callable const& callable) {
 			if constexpr (returns_void<Callable>::value) {
-				return { move(m_name), m_parameters,
+				return { 
+					move(m_name), 
+					m_parameters,
 					[&](function& function) -> value {
 						return value(callable(function));
-					}
+					},
+					m_class_definition_body
 				};
 			} else {
-				return { move(m_name), m_parameters,
+				return { 
+					move(m_name), 
+					m_parameters,
 					[&](function& function) -> value {
 						callable(function);
 						return {};
-					}
+					},
+					m_class_definition_body
 				};
 			}
 		}
@@ -1454,6 +1708,7 @@ namespace viper_::detail {
 	private:
 		std::string m_name;
 		std::vector<variable*> m_parameters;
+		bool m_class_definition_body;
 	}; // class function_builder
 } // namespace viper_::detail
 
@@ -1532,6 +1787,7 @@ namespace viper_::detail {
 		inline global(variable& variable)
 			: m_variable(&variable)
 		{
+			//if (m_variable->get_owner().bottom().)
 		}
 
 	private:
@@ -1589,6 +1845,21 @@ namespace viper_ {
 
 #define VIPER_GLOBAL (::viper_::detail::global)
 
+// Allows modification of def macro behavior when prefixed
+namespace viper_internal_method_prefix_namespace {
+	namespace viper_::detail {
+		class function {
+		public: // Lifecycle
+			
+		private:
+
+		}; // class function
+	} // namespace viper_::detail
+} // namespace viper_internal_method_prefix_namespace
+
+#define VIPER_INTERNAL_CLASS(...) 
+#define VIPER_CLASS(Name) ::viper_::detail::function Name##_definition_body = ::viper_::detail::function_builder(#Name, true) + VIPER_INTERNAL_CLASS
+
 /*~-------------------------------------------------------------------------~*\
  * Preprocessor Control                                                      *
 \*~-------------------------------------------------------------------------~*/
@@ -1607,8 +1878,11 @@ namespace viper_ {
 	#define def_ VIPER_DEF
 	#define def VIPER_NO_CAPTURE_DEF
 	#define col VIPER_COLON
-	/// TODO: Add 'global' keyword that works for variables like how f keyword works
+	/// TODO: Implement 'global' keyword that works for variables like how f keyword works
 	#define global VIPER_GLOBAL
+	
+	#define class_ VIPER_CLASS 
+
 #endif // not defined(VIPER_NO_MACRO_POLLUTION)
 
 #if not defined(VIPER_NO_NAMESPACE_POLLUTION)
@@ -1620,6 +1894,8 @@ namespace viper_ {
 
 	using viper_::list;
 	using viper_::tuple;
+	using viper_::dict;
+	using viper_::detail::object;
 #endif // not defined(VIPER_NO_NAMESPACE_POLLUTION)
 
 /*~-------------------------------------------------------------------------~*\
@@ -1656,6 +1932,8 @@ namespace viper_ {
  * Upcoming Features                                                         *
 \*~-------------------------------------------------------------------------~*/
 
+// attribute access w/ differentiation between function calls
+//     use comma operator and more "strings"_
 // import
 // classes
 // modules and __name__
