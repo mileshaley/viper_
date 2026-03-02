@@ -113,39 +113,34 @@ namespace viper_ {
 
 namespace viper_::detail {
 
-	class custom_termination_handler_instantiator {
-	public:
-
-		[[noreturn]] static inline void handler() {
-			if (std::exception_ptr exception = std::current_exception()) {
-				try {
-					std::rethrow_exception(exception);
-				} catch (type_error const& error) {
-					std::cerr << "TypeError: " << error.what() << std::endl;
-					std::exit(3);
-				} catch (syntax_error const& error) {
-					std::cerr << "SyntaxError: " << error.what() << std::endl;
-					std::exit(3);
-				} catch (index_error const& error) {
-					std::cerr << "IndexError: " << error.what() << std::endl;
-					std::exit(3);
-				} catch (value_error const& error) {
-					std::cerr << "ValueError: " << error.what() << std::endl;
-					std::exit(3);
-				} catch (attribute_error const& error) {
-					std::cerr << "AttributeError: " << error.what() << std::endl;
-					std::exit(3);
-				}
+	[[noreturn]] static inline void handle_termination() {
+		if (std::exception_ptr exception = std::current_exception()) {
+			try {
+				std::rethrow_exception(exception);
+			} catch (type_error const& error) {
+				std::cerr << "TypeError: " << error.what() << std::endl;
+				std::exit(3);
+			} catch (syntax_error const& error) {
+				std::cerr << "SyntaxError: " << error.what() << std::endl;
+				std::exit(3);
+			} catch (index_error const& error) {
+				std::cerr << "IndexError: " << error.what() << std::endl;
+				std::exit(3);
+			} catch (value_error const& error) {
+				std::cerr << "ValueError: " << error.what() << std::endl;
+				std::exit(3);
+			} catch (attribute_error const& error) {
+				std::cerr << "AttributeError: " << error.what() << std::endl;
+				std::exit(3);
 			}
-			std::abort();
 		}
+		std::abort();
+	}
 
-		custom_termination_handler_instantiator() {
-			std::set_terminate(handler);
-		}
-	};
-
-	static inline const custom_termination_handler_instantiator custom_termination_handler_instantiator_instance{};
+	// Mainly for the side effect of setting the custom termination handler
+	static inline const auto custom_termination_handler = std::invoke([]() {
+		return std::set_terminate(handle_termination);
+	});
 
 } // namespace viper_::detail
 
@@ -252,16 +247,13 @@ namespace viper_::detail {
 		}
 
 		static attribute_table const& base_attributes() {
-			static bool initialized = false;
-			static attribute_table attributes{};
-			if (initialized) { return attributes; }
-			initialized = true;
-
-			attributes.add_attribute("__init__", 0);
-			attributes.add_attribute("__str__", 0);
-
-
-			return attributes;
+			static attribute_table const& initialized_attributes = std::invoke([]() {
+				static attribute_table attributes{};
+				attributes.add_attribute("__init__", 0);
+				attributes.add_attribute("__str__", 0);
+				return attributes;
+			});
+			return initialized_attributes;
 		}
 
 		attribute_table& attributes() {
